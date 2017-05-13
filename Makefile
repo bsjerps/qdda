@@ -3,14 +3,16 @@
 # Description : Makefile for qdda (quick & dirty dedupe analyzer)
 # Author      : Bart Sjerps <bart@outrun.nl>
 # License     : GPLv3+
+# URL         : http://outrun.nl/wiki/qdda
 # ---------------------------------------------------------------------------
 
 prefix = /usr/local
 
+# CFLAGS  += -Wno-unused-but-set-variable
 CFLAGS  += -Wall
 CFLAGS  += -std=c++0x
-CFLAGS  += -O
-LIBS     = -lsqlite3 -lstdc++ -lz
+CFLAGS  += -O2
+LIBS     = -lsqlite3 -lstdc++ -lcrypto
 STATIC   = /usr/lib64/liblz4.a
 
 all: qdda

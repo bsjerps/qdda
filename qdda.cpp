@@ -16,6 +16,9 @@
  * 1.4.1 - Various improvements
  * 1.5.1 - Major performance increase when processing large amounts of data
  * 1.6.0 - Import function, file list, purge always after scanning, histograms
+ * 1.7.0 - Change to MD5, performance improvements, tmpdir, improved reports
+ * 1.7.1 - Minor bugfixes, improved long report, improved progress indicator,
+ *         -a (append) option replaces -k (keep)
  * ---------------------------------------------------------------------------
  * Build notes: Requires lz4 >= 1.7.1
  ******************************************************************************/
@@ -27,20 +30,23 @@ using namespace std;
  * global parameters - modify at own discretion
  ******************************************************************************/
 
-const char   *progversion   = "1.6.0";
-const char   *dbpath        = "/var/tmp/qdda.db"; // default database location
-const u_long blockspercycle = 64;                 // read chunk blocks at a time when throttling
-const u_long updateinterval = 10000;              // progress report every N blocks
-const u_long commitinterval = 20000;              // commit every N blocks (rows)
-const int    col1w          = 15;                 // 1st column - max 9TB without messing up
-const int    col2w          = 10;                 // 2nd column
+const char  *progversion   = "1.7.1";
+const char  *dbpath        = "/var/tmp/qdda.db"; // default database location
+const char  *tmppath       = "/var/tmp";         // tmpdir for SQLite temp files
+const ulong blockspercycle = 64;                 // read chunk blocks at a time when throttling
+const ulong updateinterval = 10000;              // progress report every N blocks
+const ulong commitinterval = 20000;              // commit every N blocks (rows)
+const int   col1w          = 15;                 // 1st column - max 9TB without messing up
+const int   col2w          = 10;                 // 2nd column
+const int   bucketsize     = 2048;               // Minimum bucketsize
 
 /*******************************************************************************
  * Constants - don't touch
  ******************************************************************************/
 
-const long mebibyte      = 1024*1024; // Bytes per MiB
-const long max_blocksize = 65536;     // max allowed blocksize
+const ulong mebibyte      = 1048576; // Bytes per MiB
+const ulong max_blocksize = 65536;   // max allowed blocksize
+const int   bucketrange   = bindepth(max_blocksize/bucketsize); // array size for buckets
 
 /*******************************************************************************
  * Initialization - globals
@@ -51,14 +57,21 @@ std::ofstream  o_debug;                  // Debug stream, open with -D option
 std::ofstream  o_verbose("/dev/stdout"); // Progress stream, disable with -q option
 
 // option parameters/switches
-bool   p_nocompress = false;  // disable compression analysis
-bool   p_noreport   = false;  // disable results report
+bool   p_nocomp     = false;  // disable compression analysis
+bool   p_norep      = false;  // disable results report
 bool   p_dryrun     = false;  // disable SQL updates
-bool   p_keep       = false;  // delete database unless
+bool   p_append     = false;  // don't delete database, just append
 bool   p_dump       = false;  // dump block offsets and hashes
-u_long p_blksz      = 8192;   // default blocksize
-u_long p_bandwidth  = 200;    // default bandwidth throttle (MB/s)
+bool   p_import     = false;  // run import
+bool   p_vacuum     = false;  // run vacuum
+bool   p_test       = false;  // run perftest
+bool   p_xrep       = false;  // run extended report
+bool   p_version    = false;  // run version info
+ulong  p_blksz      = 8192;   // default blocksize
+ulong  p_bandwidth  = 200;    // default bandwidth throttle (MB/s)
 
+// class blockval stuff
+ulong blockval::blocksz = 0; // static initialization outside class
 
 /*******************************************************************************
  * Usage
@@ -73,19 +86,21 @@ There is NO WARRANTY, to the extent permitted by law.
 )";
 
 string usage_text = R"(
-Usage: qdda [-D] [-B blksize] [-b <bandw>] [-c] [-d] [-f <dbpath>] [-i importdb] [-k] [-n] [-q] [-r] [-t] [-v] [-x] [file list]
+Usage: qdda [-D] [-B blksize] [-b <bandw>] [-c] [-d] [-f <dbpath>] [-i importdb] [-k] [-n] [-q] [-r] [-t [gb]] [-v] [-x] [file list]
   -D (debug)        : Show lots of annoying debug info
   -B <blksize_kb>   : Set blocksize to blksize_kb kilobytes
+  -P (purge)        : Reclaim unused space in database (sqlite vacuum)
+  -T <tempdir>      : Use tempdir instead of /var/tmp for SQLite temp files (or use export SQLITE_TMPDIR)
+  -a (append)       : Append data to existing database
   -b <bandw>        : Throttle bandwidth in MB/s (default 200, set to 0 to disable throttling)
   -c (no-Compress)  : Skip compression estimate
   -d (dump)         : Dump block offsets and hashes (to search for block offset with hash)
   -f <database>     : Specify alternative database location (default /var/tmp/qdda.db)
   -i <import-db>    : Import data from another database (merge with existing data)
-  -k (keep)         : Keep existing database (don't delete) - to feed additional data with multiple runs
   -n (noupdate)     : Dryrun - just read data (no processing)
   -q (quiet)        : Don't show progress indicator or intermediate results
-  -r (no-Report)    : Don't show report
-  -t (perftest)     : Run raw performance test with 10GB random data
+  -r (no-Report)    : Don't show report / don't merge
+  -t<size_gb>       : Run raw performance test (no opts) or merge test (data size in GB)
   -v (version)      : print version and copyright info
   -x (eXtended)     : Extended report (file info and histograms)
 
@@ -100,17 +115,14 @@ total               = Total data blocks scanned
 free                = Free (zeroed) space
 used                = Used (non-zero) space
 unique              = Blocks that only appear once (non-dedupable)
-deduped 2x          = Blocks that appear exactly 2 times
-deduped 3x          = Blocks that appear exactly 3 times
-deduped 4x          = Blocks that appear exactly 4 times
-deduped >4x         = Blocks that appear 5 times or more
-deduped total       = Required capacity after deduplication
-stream compressed   = Sum of deduped block bytes compressed with LZ4
-compress buckets 2k = Compressed blocks that fit in 2k slots (4 per 8K block)
-compress buckets 4k = Compressed blocks that fit in 4k slots (2 per 8K block)
-compress buckets 8k = Remaining blocks (not compressed, require full 8K block)
-total compressed    = Blocks required to fit all compress buckets (overall required capacity)
-
+dupcount = 2        = Blocks that appear exactly 2 times
+dupcount > 2        = Blocks that appear more than 2 times (more detail: run histograms)
+deduped             = Required capacity after deduplication
+buckets 2k          = Compressed blocks that fit in 2k slots (4 per 8K block)
+buckets 4k          = Compressed blocks that fit in 4k slots (2 per 8K block)
+buckets 8k          = Compressed blocks that fit in 8k slots (1 per 8K block)
+compressed (full)   = Sum of compressed block bytes (compressed with LZ4)
+compressed (bucket) = Sum of bucket sizes (compressed and sorted in buckets)
 Summary:
 percentage used     = Percentage used/total (logical capacity, before optimization)
 percentage free     = Percentage free/total (logical capacity, before optimization)
@@ -131,67 +143,93 @@ void showusage()   { cout << usage_text << endl; }
  * SQL query text
  ******************************************************************************/
 
-// Schema definition: // key-value store in SQLite: key = hash of block, v = block count, b=compressed bytes
-// kb is staging table: f=filenum, k = key, b=compressed bytes
+// SQLite Schema definition: 
+// kv: key-value store, k = hash of block, v = block count, b = compressed bytes
+// staging table: k = key, b=compressed bytes
 // metadata keeps track of the blocksize - cannot chance blocksize once created. Force metadata to have one row only.
 // files keeps track of which and how many files were imported.
 
-const char * sql_schema = "pragma page_size = 8192;\n"
-    "CREATE TABLE IF NOT EXISTS kv(k integer primary key, v integer, b integer);\n"
-    "CREATE TABLE IF NOT EXISTS staging(f integer,k integer, b integer);\n"
-    "CREATE TABLE IF NOT EXISTS files(id integer primary key autoincrement, name TEXT, blocks integer, size integer);\n"
-    "CREATE TABLE IF NOT EXISTS metadata(\n"
-    "lock char(1) not null default 1\n"
-    ", blksz integer\n"
-    ", constraint pk_t1 primary key(lock)\n"
-    ", constraint ck_t1_l check (lock=1))\n";
+const char * sql_schema = R"(pragma page_size = 8192;
+CREATE TABLE IF NOT EXISTS metadata(lock char(1) not null default 1, blksz integer, constraint pk_t1 primary key(lock), constraint ck_t1_l check (lock=1));
+CREATE TABLE IF NOT EXISTS files(id integer primary key autoincrement, name TEXT, blocks integer, size integer);
+CREATE TABLE IF NOT EXISTS kv(k unsigned integer primary key, v integer, b integer);
+CREATE TABLE IF NOT EXISTS staging(k integer, b integer);
+)";
 
-const char *sql_optimize = "PRAGMA journal_mode = OFF;PRAGMA synchronous = OFF"; // performance optimizations 
+const char *sql_optimize = "PRAGMA journal_mode = off;PRAGMA synchronous = OFF";
 const char *sql_cache    = "PRAGMA cache_size = 10000";
 const char *sql_fileid   = "select coalesce(max(id),0) from files";
 const char *sql_blksz    = "select blksz from metadata";
 const char *sql_blkcount = "select count(*) from staging";
 const char *sql_commit   = "END TRANSACTION;BEGIN TRANSACTION";
-const char *sql_insert   = "insert into staging(f,k,b) values (?,?,?)";
-const char *sql_purge    = "delete from staging;vacuum;";
-const char *sql_import   = "insert or replace into main.kv\n"
-                           "select tmpdb.kv.k\n"
-                           ", coalesce(main.kv.v,0) + tmpdb.kv.v\n"
-                           ", tmpdb.kv.b from tmpdb.kv\n"
-                           "left outer join main.kv on main.kv.k = tmpdb.kv.k\n"
-                           "group by tmpdb.kv.k\n"
-                           "order by main.kv._rowid_,tmpdb.kv.k\n";
-const char *sql_merge    = "insert or replace into kv\n"
-                           "select staging.k\n"
-                           ", coalesce(kv.v,0) + count(staging.k)\n"
-                           ", staging.b from staging\n"
-                           "left outer join kv on kv.k = staging.k\n"
-                           "group by staging.k\n"
-                           "order by kv._rowid_,staging.k";
+const char *sql_insert   = "insert into staging(k,b) values (?,?)";
+const char *sql_purge    = "drop index if exists staging_ix;delete from staging;";
+const char *sql_index    = "create index if not exists staging_ix on staging(k,b)";
+const char *sql_import   = R"(insert or replace into main.kv
+select tmpdb.kv.k
+, coalesce(main.kv.v,0) + tmpdb.kv.v
+, tmpdb.kv.b from tmpdb.kv
+left outer join main.kv on main.kv.k = tmpdb.kv.k
+group by tmpdb.kv.k
+order by main.kv._rowid_,tmpdb.kv.k
+)";
+const char * sql_merge   = R"(insert or replace into kv
+select staging.k, coalesce(kv.v,0)+count(staging.k), staging.b from staging
+left outer join kv on kv.k = staging.k
+group by staging.k
+)";
 
-/****************************************************************************
-* Various
-****************************************************************************/
+/*******************************************************************************
+ * Various
+ ******************************************************************************/
 
-// true if file exists
+// test if file exists
 int file_exists(string& fn) {
   ifstream f(fn.c_str());
   if(!f.fail()) return 1;
   return 0;
 }
 
-// get crc32 hash or 0 if block is zero
-u_long blockhash(const char * buf,const int size) {
+/*******************************************************************************
+ * Notes on hash algorithm
+ * SQLite integer (also used for primary key on kv table) has max 8 bytes and is
+ * signed integer. MAX value is 9 223 372 036 854 775 808. The max value of
+ * unsigned long (64 bit) is 18446744073709551615UL which result in negative
+ * hash values in the kv table. MD5 sum is 128 bit which would not fit in SQLite
+ * integers and would be converted to another datatype (TXT or blob).
+ * I found hash collisions with CRC32 on large datasets so needed another hash
+ * function - see https://en.wikipedia.org/wiki/Birthday_problem#Probability_table
+ * which shows 50% chance of collisions with 77000 rows on 32bit hash which equals
+ * 630MiB using 8K blocksize. Problem gets worse when increasing the dataset.
+ * 6 bytes (48 bits) is a tradeoff between DB space consumed, performance and
+ * accuracy and has a 50% chance of collision with 20M rows (164GiB @ 8K)
+ * which is fine for datasets up to many terabytes.
+ * Rebuild with 56-bit hash will get roughly 1 collision in about 2.4 TiB @ 8K
+ * A 64-bit hash would get roughly 1 collision every 41 TiB @ 8K.
+ */
+
+// returns the least significant 6 bytes of the md5 hash (16 bytes) as unsigned long
+ulong hash6_md5(const char * buf, const int size) {
+  unsigned char digest[16];
+  const unsigned char * ubuf = (unsigned char *)buf;
   static int f = 0;
-  static char zerobuf[max_blocksize];               // allocate static buffer (once)
-  if(memcmp (buf,zerobuf,size)==0) return 0;        // return 0 for zero block
-  if(!f) { memset(zerobuf,0,max_blocksize); f=1; }  // force hash=0 for zero block
-  return crc32(0, (const unsigned char*)buf, size); // get crc
+  static char zerobuf[max_blocksize];                             // allocate static buffer (once)
+  if(!f) { memset(zerobuf,0,max_blocksize); f=1; }                // force hash=0 for zero block
+  if(memcmp (buf,zerobuf,size)==0) return 0;                      // return 0 for zero block
+  MD5(ubuf,size,digest);                                          // get MD5 (as string)
+  return                            // ignore chars 0-9
+  /*((ulong)digest[9]  << 48) +*/   // enable this for 56-bit hashes vs 48-bit
+    ((ulong)digest[10] << 40) +     // convert char* to ulong but keeping
+    ((ulong)digest[11] << 32) +     // the right order, only use lower 6 bytes (char 10-15)
+    ((ulong)digest[12] << 24) +     // SQLite integer is 8 byte signed so we need to stay within
+    ((ulong)digest[13] << 16) +     // 8 bytes and unsigned. 6 bytes is best compromise
+    ((ulong)digest[14] << 8 ) +
+    ((ulong)digest[15]);
 }
 
 // Get compressed bytes for a compressed block - lz4
 u_int compress(const char * src,const int size) {
-  if(p_nocompress==true) return size;                           // if compression is disabled, return blocksize
+  if(p_nocomp==true) return size;                               // if compression is disabled, return blocksize
   static char buf[max_blocksize+1024];                          // compressed block may be larger than uncompressed
   int result = LZ4_compress_default(src, buf, size, size+1024); // call LZ4 compression lib, only use bytecount
   if(result>size) return size;                                  // don't compress if size is larger
@@ -199,25 +237,17 @@ u_int compress(const char * src,const int size) {
   return result;
 }
 
-// Throttling mechanism - microsleep every <bytes> to adjust read MB/s
-void throttle(const u_long& bandwidth,const u_long& bytes) {
-  if(!bandwidth) return;                   // immediately return if we don't throttle
-  static u_long cycletime = 0;             // cycle time (required microseconds per chunk)
-  static auto   prev      = clocknow;      // keep t1 between calls
-  auto          now       = clocknow;      // current time
-  if(!cycletime) {                         // initialization when first called
-    cycletime = bytes / bandwidth;         // every <cycletime> ms, process <bytes> in servicetime and sleep for rest of the period
-    o_verbose << "Throttling @ " << bandwidth << " MB/s (cycletime=" << cycletime << " us," << bytes/1024 << " KiB per cycle)" << endl;
-    return;
-  };
-  u_long servicetime = clockdiff(now,prev);
+void throttle(const ulong cycletime) {
+  if(!cycletime) return;                     // immediately return if we don't throttle
+  static auto   clockprev   = clocknow;      // keep t1 between calls
+  ulong         servicetime = clockdiff(clocknow,clockprev);
   if(cycletime > servicetime) usleep(cycletime - servicetime);
-  prev=clocknow; // measure time diff for next call
+  clockprev=clocknow; // measure time diff for next call
 }
 
-/****************************************************************************
-* Formatting & printing
-****************************************************************************/
+/*******************************************************************************
+ * Formatting & printing
+ ******************************************************************************/
 
 std::string printPRC(float perc) { 
   stringstream ss;
@@ -225,122 +255,74 @@ std::string printPRC(float perc) {
   return ss.str(); 
 }
 
-std::string printMIB(u_long bytes)   {
+std::string printMIB(ulong bytes)   {
   stringstream ss;
   ss << setfill(' ') << fixed << setprecision(2) << setw(4) << (float)bytes / mebibyte << " MiB";
   return ss.str(); 
 }
-std::string printBLK(u_long blocks)   {
+std::string printBLK(ulong blocks)   {
   stringstream ss;
   ss << setfill(' ') << to_string(blocks) + " blocks";
   return ss.str(); 
 }
 
-// class blockval stuff
-u_long blockval::blocksz = 0; // static initialization outside class
-void blockval::setblocksize(u_int b) { blocksz = b; }
-void blockval::operator=(u_long x) { blks = x; }
-
 // reset manipulators of an ostream (copy default flags from null)
 void os_reset(std::ostream& os = cout) { os.copyfmt(std::ios(NULL)); }
 
-void showdump(u_long block, u_long hash,u_long bytes) {
-  cout << dec << setw(9) << setfill('0') << block << ","  
-       << hex << setw(8) << hash << ","
-       << dec << setw(5) << bytes << endl;
+void showdump(ulong block, ulong hash,ulong bytes) {
+  cout << dec << setw(9) << setfill('0') << block
+       << ","  << hex << setw(18) << showbase << internal << hash 
+       << ","  << dec << setw(5)  << bytes << endl;
 }
 
-// Show progress information, updated every N blocks
-void showprogress(int newfnum, u_long blocks, u_long bytes, const char * msg = NULL) {
-  static auto   start = clocknow;    // time of start processing file
-  static auto   prev  = clocknow;    // time of previous call
-  static int    fnum  = 0;           // previous file num (tells us when new file process starts)
-  static u_long prevb = 0;           // keep track of previous byte count
-  auto          now   = clocknow;    // current time
-  if(fnum!=newfnum) { start=now ; fnum=newfnum ; }          // initialize when processing a new file
+void showprogress(const std::string& str) {
+  static unsigned int l = 0;
+  l = str.length() > l ? str.length() : l;               // track largest string length
+  if(str.length() == 0) {                                // clear line if string empty
+    for(u_int i=0;i<l;i++) o_verbose << ' ';
+    for(u_int i=0;i<l;i++) o_verbose << '\b';
+  } else {
+    o_verbose << str;
+    for(u_int i=0;i<str.length();i++) o_verbose << '\b'; // returns the cursor to original offset
+    o_verbose << flush;
+  }
+}
+
+// Show progress information, updated every N blocks. 
+void progress(ulong blocks, ulong bytes = 0, const char * msg = NULL) {
+  static auto  start = clocknow;    // time of start processing file
+  static auto  prev  = clocknow;    // time of previous call
+  auto         now   = clocknow;    // current time
+  static int   fnum  = 0;           // previous file num (tells us when new file process starts)
+  static ulong prevb = 0;           // keep track of previous byte count
+  if(blocks==0) {                   // reset stats before processing new file
+    start=clocknow;
+    prev=clocknow;
+    prevb=0;
+    fnum++;
+  }
   auto avgsvctm = clockdiff(now,start);                     // service time of xx bytes since start of file
   auto cursvctm = clockdiff(now,prev);                      // service time of xx bytes since previous call
   auto avgbw = (avgsvctm==0) ? 0 : bytes/avgsvctm;          // bytes per second since start of file
   auto curbw = (cursvctm==0) ? 0 : (bytes-prevb)/cursvctm;  // bytes per second since previous call
   stringstream ss;                                          // generate a string with the progress message
-  ss << "File " << setfill('0') << setw(2) << fnum << ", " << blocks << " blocks, " 
-     << bytes/mebibyte << " MiB processed, " << curbw << " MB/s, " << avgbw << " MB/s avg";
+  ss << "File " << setfill('0') << setw(2) << fnum << ", "
+     << blocks << " blocks ("  << bytes/mebibyte << " MiB) processed, "
+     << curbw << "/" << (p_bandwidth?p_bandwidth:9999) << " MB/s, " << avgbw << " MB/s avg";
   if(msg) ss << msg;                                        // add message if specified
   ss << "                 " ;                               // blank rest of line
-  o_verbose << ss.str();
-  for(u_int i=0;i<ss.str().length();i++) o_verbose << '\b'; // returns the cursor to beginning of line
-  o_verbose << flush;
+  showprogress(ss.str());
   prev=now; prevb=bytes;                                    // save values for next call
 }
 
-// Print stats report
-void report() {
-  dbase.open(); // open db if it wasn't open already
-  os_reset();   // reset std::cout state
+/*******************************************************************************
+ * SQLite stuff
+ ******************************************************************************/
 
-  auto     blocksize  = dbase.select_long("select blksz from metadata");                       // Blocksize used when scanning
-  blockval blk_total  = dbase.select_long("select sum(v) from kv");                            // Total scanned blocks
-  blockval blk_free   = dbase.select_long("select v from kv where k=0");                       // Total zero blocks
-  blockval blk_used   = dbase.select_long("select sum(v) from kv where k!=0");                 // Total non-zero blocks
-  blockval blk_dedup  = dbase.select_long("select count(*) from kv where k!=0");               // Unique hashes (deduped)
-  blockval blk_count1 = dbase.select_long("select count(v) from kv where k!=0 and v=1");       // Hashes with count=1 (non-dedupeable data)
-  blockval blk_count2 = dbase.select_long("select count(v) from kv where k!=0 and v=2");       // Hashes with count=2 (dedupable data)
-  blockval blk_count3 = dbase.select_long("select count(v) from kv where k!=0 and v=3");       // Hashes with count=3 (dedupable data)
-  blockval blk_count4 = dbase.select_long("select count(v) from kv where k!=0 and v=4");       // Hashes with count=4 (dedupable data)
-  blockval blk_counth = dbase.select_long("select count(v) from kv where k!=0 and v>4");       // Hashes with count=5 (dedupable data)
-  auto     bytes_comp = dbase.select_long("select sum(b)   from kv where k!=0");               // Total bytes after full compression
-  auto     buckets_2k = dbase.select_long("select count(*) from kv where b>0    and b<=2048"); // Blocks that compress into 2k
-  auto     buckets_4k = dbase.select_long("select count(*) from kv where b>2048 and b<=4096"); // Blocks that compress into 2k+1 - 4k
-  auto     buckets_8k = dbase.select_long("select count(*) from kv where b>4096");             // Blocks that don't fit in other buckets
-
-  blk_total.setblocksize(blocksize);
-
-  // calc compression buckets
-  u_long blk_2k = buckets_2k * 2048 / blocksize; // 1 8K block holds 4 2K buckets
-  u_long blk_4k = buckets_4k * 4096 / blocksize; // 1 8K block holds 2 4K buckets
-  u_long blk_8k = buckets_8k * 8192 / blocksize; // blocks that don't fit require entire block
-  blockval blk_rq = blk_2k + blk_4k + blk_8k;    // required blocks after bucket compression
-
-  // calc ratios - divide by zero results in value 0
-  float comp_ratio   = 1 - safe_div (bytes_comp,blk_dedup.bytes()); // full compression ratio
-  float dedup_ratio  = safe_div (blk_used,  blk_dedup);             // dedupe ratio
-  float used_ratio   = safe_div (blk_used,  blk_total);             // % used vs free
-  float thin_ratio   = safe_div (blk_total, blk_used);              // % free vs used (thin provisioning)
-  float bucket_ratio = safe_div (blk_dedup, blk_rq);                // bucket compression ratio (sorted into slots)
-
-  // dump the formatted report
-  cout << setprecision(2) << fixed; // display float as xyz.ab
-  cout    << "                      " << w1 << "*** Details ***"
-  << endl << "blocksize           = " << w1 << to_string(blocksize/1024) + " KiB"
-  << endl << "total               = " << w1 << printMIB(blk_total.bytes())  << " (" << w2 << blk_total  << " blocks)"
-  << endl << "free                = " << w1 << printMIB(blk_free.bytes() )  << " (" << w2 << blk_free   << " blocks)"
-  << endl << "used                = " << w1 << printMIB(blk_used.bytes() )  << " (" << w2 << blk_used   << " blocks)"
-  << endl << "unique              = " << w1 << printMIB(blk_count1.bytes()) << " (" << w2 << blk_count1 << " blocks)"
-  << endl << "deduped 2x          = " << w1 << printMIB(blk_count2.bytes()) << " (" << w2 << blk_count2 << " blocks)"
-  << endl << "deduped 3x          = " << w1 << printMIB(blk_count3.bytes()) << " (" << w2 << blk_count3 << " blocks)"
-  << endl << "deduped 4x          = " << w1 << printMIB(blk_count4.bytes()) << " (" << w2 << blk_count4 << " blocks)"
-  << endl << "deduped >4x         = " << w1 << printMIB(blk_counth.bytes()) << " (" << w2 << blk_counth << " blocks)"
-  << endl << "deduped total       = " << w1 << printMIB(blk_dedup.bytes())  << " (" << w2 << blk_dedup  << " blocks)"
-  << endl << "stream compressed   = " << w1 << printMIB(bytes_comp)         << " (" << w2 << 100*comp_ratio  << " %)"
-  << endl << "compress buckets 2k = " << w1 << printMIB(buckets_2k*2048)    << " (" << w2 << buckets_2k << " buckets)"
-  << endl << "compress buckets 4k = " << w1 << printMIB(buckets_4k*4096)    << " (" << w2 << buckets_4k << " buckets)"
-  << endl << "compress buckets 8k = " << w1 << printMIB(buckets_8k*8192)    << " (" << w2 << buckets_8k << " buckets)"
-  << endl << "total compressed    = " << w1 << printMIB(blk_rq.bytes())     << " (" << w2 << blk_rq     << " blocks)"
-  << endl << "                      " << w1 << "*** Summary ***"
-  << endl << "percentage used     = " << w1 << to_string(100*used_ratio,2)     << " %"
-  << endl << "percentage free     = " << w1 << to_string(100-100*used_ratio,2) << " %"
-  << endl << "deduplication ratio = " << w1 << to_string(dedup_ratio,2)
-  << endl << "compression ratio   = " << w1 << to_string(bucket_ratio,2)
-  << endl << "thin ratio          = " << w1 << to_string(thin_ratio,2)
-  << endl << "combined            = " << w1 << to_string(dedup_ratio*bucket_ratio*thin_ratio,2)
-  << endl << "raw capacity        = " << w1 << printMIB(blk_total.bytes())
-  << endl << "net capacity        = " << w1 << printMIB(blk_rq.bytes())
-  << endl;
+void vacuum() {
+  dbase.open();
+  dbase.sql("vacuum");
 }
-
-/****************************************************************************
-* SQLite stuff
-****************************************************************************/
 
 sqlquery::sqlquery(sqlitedb& db, const char * query) {
   if(!db.db) die("Creating query: Database not open");
@@ -362,9 +344,10 @@ int sqlquery::next() {
   return 0;
 }
 
-u_long sqlquery::exec(const u_long p1) {
+// Return first value of query - one parameter
+ulong sqlquery::exec(const ulong p1) {
   if(!stmt) die("Query exec statement error");
-  u_long retval = 0;
+  ulong retval = 0;
   sqlite3_bind_int64(stmt, 1, p1);
   sqlite3_step(stmt);
   retval = sqlite3_column_int64(stmt, 0);
@@ -372,9 +355,10 @@ u_long sqlquery::exec(const u_long p1) {
   return retval;
 }
 
-u_long sqlquery::exec(const u_long p1, const u_long p2) {
+// Return first value of query - two parameters
+ulong sqlquery::exec(const ulong p1, const ulong p2) {
   if(!stmt) die("Query exec statement error");
-  u_long retval = 0;
+  ulong retval = 0;
   sqlite3_bind_int64(stmt, 1, p1);
   sqlite3_bind_int64(stmt, 2, p2);
   sqlite3_step(stmt);
@@ -383,9 +367,10 @@ u_long sqlquery::exec(const u_long p1, const u_long p2) {
   return retval;
 }
 
-u_long sqlquery::exec(const u_long p1, const u_long p2,const u_long p3) {
+// Return first value of query - three parameters
+ulong sqlquery::exec(const ulong p1, const ulong p2,const ulong p3) {
   if(!stmt) die("Query exec statement error");
-  u_long retval = 0;
+  ulong retval = 0;
   sqlite3_bind_int64(stmt, 1, p1);
   sqlite3_bind_int64(stmt, 2, p2);
   sqlite3_bind_int64(stmt, 3, p3);
@@ -394,8 +379,6 @@ u_long sqlquery::exec(const u_long p1, const u_long p2,const u_long p3) {
   sqlite3_reset(stmt);
   return retval;
 }
-
-void sqlitedb::close() { if(db) { sqlite3_close(db); db = 0; }}
 
 // Open database and create tables if needed
 int sqlitedb::open() {
@@ -411,6 +394,7 @@ int sqlitedb::open() {
     sql(sql_cache);
     sql(sql_schema);
     sql(sql_optimize);
+    sql("PRAGMA temp_store_directory = '" + tmpdir + "'");
     auto blksz = select_long(sql_blksz);
     if(!blksz) sql("insert into metadata (blksz) values (" + to_string(p_blksz) + ")");
     o_debug << "DB opened: " << fn << endl;
@@ -459,10 +443,10 @@ void sqlitedb::sql(const string& query) {
   o_debug << ", runtime " << t_diff << " microsec (" << to_string((float)t_diff/1000000,2) << " s)" << endl;
 }
 
-void save_filemeta(const string& name, u_long blocks, u_long bytes) {
+// Save file info in DB
+void save_filemeta(const string& name, ulong blocks, ulong bytes) {
   stringstream fq;
-  fq << "insert into files(name,blocks,size) values ('" << name << "'," 
-     << blocks << "," << bytes << ")";
+  fq << "insert into files(name,blocks,size) values ('" << name << "'," << blocks << "," << bytes << ")";
   dbase.sql(fq.str());
 }
 
@@ -480,7 +464,7 @@ int sqlitedb::callback(void *r, int argc, char **argv, char **azColName) {
    }
    if(!qr->data.empty()) qr->data += "\n";
    for(int i=0; i<argc; i++) {
-     if(qr->tabs[i]) d << setw(abs(qr->tabs[i]));
+     if(qr->tabs[i])   d << setw(abs(qr->tabs[i]));
      if(qr->tabs[i]<0) d << right; else d << left;
      d <<(const char *)(argv[i]?argv[i]:"NULL") << " ";
    }
@@ -509,13 +493,14 @@ int sqlitedb::runquery(const char * tabstr,const string& query) {
 }
 
 // run SQL statement, return longint value (select)
-u_long sqlitedb::select_long(const string& query) {
+ulong sqlitedb::select_long(const string& query) {
+  auto         t_start = clocknow;
   int          rc      = 0;
-  u_long       retval  = 0;
+  ulong        retval  = 0;
   sqlite3_stmt *stmt   = 0;
   const char   *pzTest = NULL;
 
-  o_debug << "query=" << query << endl;
+  o_debug << "query=" << query << flush;
   if(db==0) die("Query on closed database");
   rc = sqlite3_prepare_v2(db, query.c_str(), strlen(query.c_str()), &stmt, &pzTest);
   if(rc!=SQLITE_OK) die("SQL prepare error: " + query);
@@ -527,34 +512,66 @@ u_long sqlitedb::select_long(const string& query) {
     if(rc!=SQLITE_DONE) die("SQL: Multiple return values for " + query);
   }
   sqlite3_finalize(stmt);
+  auto t_diff = clockdiff(clocknow,t_start);
+  o_debug << ", runtime " << t_diff << " microsec (" << to_string((float)t_diff/1000000,2) << " s)" << endl;
   return retval;
 }
 
-/****************************************************************************
-* Functions
-****************************************************************************/
+/*******************************************************************************
+ * Functions
+ ******************************************************************************/
+
+// Merge staging data into kv table, track & display time to merge
+void merge() {
+  stringstream ss1,ss2;
+  auto blksz  = dbase.select_long(sql_blksz);
+  auto rowskv = dbase.select_long("select count(*) from kv");
+  auto rowsst = dbase.select_long("select count(*) from staging");
+  auto mibst  = rowsst*blksz/mebibyte;
+  auto mibkv  = rowskv*blksz/mebibyte;
+  if(!rowsst) return;
+  o_verbose << "Adding " << rowsst << " blocks (" << mibst << " MiB) with " << rowskv << " blocks (" << mibkv << " MiB)" << endl;
+  ss1 << "Indexing" << flush;
+  showprogress(ss1.str());
+  auto t_begin = clocknow;
+  dbase.sql(sql_index);
+  auto time_index  = clockdiff(clocknow,t_begin);
+  float index_sec  = (float)time_index/1000000;
+  ulong index_rps  = rowsst*1000000/time_index;
+  ulong index_mbps = mibst*1000000/time_index;
+  ss1 << " in " << setprecision(2) << fixed << index_sec << " sec (" << index_rps << " blocks/s, " << index_mbps << " MiB/s)";
+  ss2 << ss1.str() << ", Merging" << flush;
+  showprogress(ss2.str());
+  t_begin = clocknow;
+  dbase.sql(sql_merge);
+  auto time_merge = clockdiff(clocknow,t_begin);
+  float merge_sec  = (float)time_merge/1000000;
+  ulong merge_rps  = rowsst*1000000/time_merge;
+  ulong merge_mbps = mibst*1000000/time_merge;
+  ss2 << " in " << setprecision(2) << fixed << merge_sec << " sec (" << merge_rps << " blocks/s, " << merge_mbps << " MiB/s)";
+  o_verbose << ss2.str() << endl;
+  dbase.sql(sql_purge);
+}
 
 // process file
 void analyze(const char * filename) {
-  char buf[max_blocksize]; // buffer for calculating checksums etc
-  ifstream f;              // file to be processed
-  int fnum            = 0; // file number
-  u_int  hash         = 0; // crc32 will be stored here
-  u_long blocks       = 0; // block counter
-  u_long bytes        = 0; // byte counter
-  u_int  cbytes       = 0; // compressed bytes
+  dbase.open();
+  auto blksz = dbase.select_long(sql_blksz); // get blocksize from db
+  char buf[max_blocksize];                   // buffer for calculating checksums etc
+  ifstream f;                                // file to be processed
+  ulong cycletime = 0;                       // throttle cycletime in usec
+  ulong hash      = 0;                       // crc32 will be stored here
+  ulong blocks    = 0;                       // block counter
+  ulong bytes     = 0;                       // byte counter
+  uint  cbytes    = 0;                       // compressed bytes
+  sqlquery q_insert(dbase, sql_insert);      // setup prepared insert query
+  cycletime = safediv_ulong(blksz*blockspercycle,p_bandwidth);
 
   f.open(filename);
   if (!f.is_open()) die("File open failed");
 
-  dbase.open();                                          // does nothing if already open
-  fnum = dbase.select_long(sql_fileid) + 1;              // increase file counter
-  sqlquery q_insert(dbase, sql_insert);                  // setup prepared insert query
-  auto blksz = dbase.select_long(sql_blksz);             // get blocksize from db
-  auto pages = dbase.select_long("pragma cache_size");   // get & show cache size
-  o_debug << "Cache pages: " << pages << endl;
-
   // start looping through file blocks
+  progress(0);                                           // reset progress counter
   dbase.sql("BEGIN TRANSACTION");
   while (!f.eof()) {
     cbytes = 0;                                          // 0 for zero block
@@ -562,33 +579,23 @@ void analyze(const char * filename) {
     f.read(buf,blksz);                                   // read 1 block
     if(f.gcount()==0) break;                             // zero bytes read = end reached
     bytes += f.gcount();
-    if(!p_dryrun) {
-      hash = blockhash(buf,blksz);                       // get the crc32 hash, or 0 if zero block
-      if(hash)      cbytes = compress(buf,blksz);        // get compressed size
-      if(p_dump)    showdump(blocks,hash,cbytes);        // dump hashes with -d option
-      if(!p_dryrun) q_insert.exec(fnum,hash,cbytes);     // insert or update into database temp table
-    }
+    hash = hash6_md5(buf,blksz);                         // get the md5 hash (lower 6 bytes), or 0 if zero block
+    if(hash)      cbytes = compress(buf,blksz);          // get compressed size
+    if(p_dump)    showdump(blocks,hash,cbytes);          // dump hashes with -d option
+    if(!p_dryrun) q_insert.exec(hash,cbytes);            // insert or update into database temp table
     blocks++;
-    if(blocks%commitinterval==0) dbase.sql(sql_commit);                       // commit every n rows
-    if(blocks%updateinterval==0) showprogress(fnum,blocks,bytes);             // progress indicator
-    if(blocks%blockspercycle==0) throttle(p_bandwidth, blksz*blockspercycle); // throttle bandwidth
+    if(blocks%commitinterval==0) dbase.sql(sql_commit);  // commit every n rows
+    if(blocks%updateinterval==0) progress(blocks,bytes); // progress indicator
+    if(blocks%blockspercycle==0) throttle(cycletime);    // throttle bandwidth
   };
   dbase.sql("END TRANSACTION");
+  progress(blocks,bytes);        
   save_filemeta(filename,blocks,bytes);
-  // Merge staging data into kv table, track & display time to merge
-  auto t_begin = clocknow;
-  showprogress(fnum,blocks,bytes," Importing...");
-  dbase.sql(sql_merge);
-  auto time_merge = clockdiff(clocknow,t_begin);
-  dbase.sql(sql_purge);
-  string ss = ", Imported in ";
-  ss += to_string((float)time_merge/1000000,2) + " sec";
-  showprogress(fnum,blocks,bytes,ss.c_str());
   o_verbose << endl;
-};
+}
 
 // import data from another qdda database
-void import(const char *fn) {
+void import(const char * fn) {
   dbase.open();
   stringstream q_attach;
   q_attach << "attach database '" << fn << "' as tmpdb";
@@ -605,62 +612,157 @@ void import(const char *fn) {
 
 // refuse to set blocksize too high
 void set_blocksize(const char * in) {
-  long bsize = atol(in);
+  ulong bsize = atol(in);
   if(bsize*1024>max_blocksize) die("Blocksize exceeded");
   p_blksz=1024*bsize;
 }
 
-void perftest(const long gb = 10) {
-  const long blocksize = 8192;
-  const long totbytes  = gb * 1024 * mebibyte;
-  const long bufsize   = 16 * mebibyte;
-  const long cycles    = totbytes / bufsize;
-  const long blocks    = bufsize/blocksize;
-  char      *testdata  = new char[bufsize];
-  auto       t_begin   = clocknow;
+// test merging performance with random data
+void mergetest(ulong gb) {
+  const ulong rowspergb  = 131072;
+  const ulong rows       = rowspergb * gb;
+  dbase.open();
+  sqlquery q_insert(dbase, sql_insert);
+  srand (time(NULL));
+  cout << "Merge test: Loading " << rows << " blocks (" << rows*8192/mebibyte << " MiB)" << flush;
+  for(ulong i=0;i<rows;i++) q_insert.exec(lrand() & 0x0000FFFFFFFFFFFF,rand() % 8192);
+  save_filemeta("dummy", rows, rows*8192);
+  cout << endl;
+  merge();
+}
 
-  memset(testdata,0,bufsize);                             // clear buffer
-  for(long i=0;i<bufsize;i++) testdata[i] = rand() % 256; // fill test buffer with random data
+// test hashing, compression and insert performance
+void speedtest() {
+  const ulong blocksize  = 8192;
+  const ulong rowspergb  = 131072;
+  const ulong bufsize    = 1024 * mebibyte;
+  char       *testdata   = new char[bufsize];
+  auto        clockstart = clocknow;
+
+  srand(1);
+  memset(testdata,0,bufsize);                              // clear buffer
+  for(ulong i=0;i<bufsize;i++) testdata[i] = (char)rand() % 256; // fill test buffer with random data
   dbase.open();
 
   cout << fixed << setprecision(2);
-  cout << "Test set:    " << w1 << cycles * blocks << " random 8k blocks (" << totbytes/mebibyte << " MiB)" << endl;
+  cout << "Test set:    " << w1 << rowspergb << " blocks, 8k (" << bufsize/mebibyte << " MiB)" << endl;
 
   // test hashing performance
-  t_begin = clocknow;
-  for(long j=0;j<cycles;j++) for(long i=0;i<blocks;i++) blockhash(testdata + i*blocksize,blocksize);
-  auto time_hash = clockdiff(clocknow,t_begin);
+  clockstart = clocknow;
+  for(ulong i=0;i<rowspergb;i++) hash6_md5(testdata + i*blocksize,blocksize);
+  auto time_hash = clockdiff(clocknow,clockstart);
 
   // test compression performance
-  t_begin = clocknow;
-  for(long j=0;j<cycles;j++) for(long i=0;i<blocks;i++) compress(testdata + i*blocksize,blocksize);
-  auto time_compress = clockdiff(clocknow,t_begin);
-
+  clockstart = clocknow;
+  for(ulong i=0;i<rowspergb;i++) compress(testdata + i*blocksize,blocksize);
+  auto time_compress = clockdiff(clocknow,clockstart);
+  
   // test sqlite insert performance
-  t_begin = clocknow;
+  clockstart = clocknow;
   sqlquery q_insert(dbase, sql_insert);
   dbase.sql("BEGIN TRANSACTION");
-  for(long j=0;j<cycles;j++) for(long i=0;i<blocks;i++) q_insert.exec(0,i,8192); 
+  for(ulong i=0;i<rowspergb;i++) q_insert.exec(i,8192);
   dbase.sql("END TRANSACTION");
-  auto time_insert = clockdiff(clocknow,t_begin);
+  auto time_insert = clockdiff(clocknow,clockstart);
 
   auto time_total = time_hash + time_compress + time_insert;
-  cout << "Hashing:     " << w1 << time_hash     << " microseconds, " << w2 << (float)totbytes/time_hash     << " MB/s" << endl;
-  cout << "Compressing: " << w1 << time_compress << " microseconds, " << w2 << (float)totbytes/time_compress << " MB/s" << endl;
-  cout << "DB insert:   " << w1 << time_insert   << " microseconds, " << w2 << (float)totbytes/time_insert   << " MB/s" << endl;
-  cout << "Total:       " << w1 << time_total    << " microseconds, " << w2 << (float)totbytes/time_total    << " MB/s" << endl;
+  cout << "Hashing:     " << w1 << time_hash     << " usec, " << w2 << (float)bufsize/time_hash     << " MB/s" << endl;
+  cout << "Compressing: " << w1 << time_compress << " usec, " << w2 << (float)bufsize/time_compress << " MB/s" << endl;
+  cout << "DB insert:   " << w1 << time_insert   << " usec, " << w2 << (float)bufsize/time_insert   << " MB/s" << endl;
+  cout << "Total:       " << w1 << time_total    << " usec, " << w2 << (float)bufsize/time_total    << " MB/s" << endl;
 
   dbase.sql(sql_purge);
+  delete[] testdata;
 }
 
-void xreport() {
+void perftest(const char *arg) {
+  if (p_append==false) { file_delete(dbase.filename()); }
+  if(arg) mergetest(atol(arg));
+  else speedtest();
+}
+
+/*******************************************************************************
+ * Reports
+ ******************************************************************************/
+
+// Print stats report
+void report() {
+  dbase.open();                // open db if it wasn't open already
+  os_reset();                  // reset std::cout state
+  merge();                     // merge staging data if any
+  ulong buckets[bucketrange];  // compression buckets
+  ulong blocks[bucketrange];   // compression blocks (each block holds x buckets where x=blocksize/bucketsize)
+  sqlquery q_buckets(dbase, "select count(*) from kv where b between ? and ?");
+  auto     blocksize   = dbase.select_long("select blksz from metadata");                         // Blocksize used when scanning
+  blockval blk_total   = dbase.select_long("select sum(v) from kv");                              // Total scanned blocks
+  blockval blk_free    = dbase.select_long("select v from kv where k=0");                         // Total zero blocks
+  blockval blk_used    = dbase.select_long("select sum(v) from kv where k!=0");                   // Total non-zero blocks
+  blockval blk_dedup   = dbase.select_long("select count(*) from kv where k!=0");                 // Unique hashes (deduped)
+  blockval blk_count1  = dbase.select_long("select count(v) from kv where k!=0 and v=1");         // Hashes with count=1 (non-dedupable data)
+  blockval blk_count2  = dbase.select_long("select count(v) from kv where k!=0 and v=2");         // Hashes with count=2 (dedupable data)
+  blockval blk_counth  = dbase.select_long("select count(v) from kv where k!=0 and v>2");         // Hashes with count>2 (dedupable data)
+  auto     bytes_comp  = dbase.select_long("select sum(b)   from kv where k!=0");                 // Total bytes after full compression
+  blockval::setblocksize(blocksize);
+  blockval blk_rq;
+  for(int i=0;i<bucketrange;i++) { // calc compression buckets
+    int max = (bucketsize << i);
+    int min = i?(1024<<i)+1:1;
+    buckets[i]=q_buckets.exec(min,max);
+    blocks[i]=buckets[i]*max/blocksize;
+    blk_rq = blk_rq + blocks[i];
+  }
+  // calc ratios - divide by zero results in value 0
+  float comp_ratio   = 1 - safediv_float (bytes_comp,blk_dedup.bytes()); // full compression ratio
+  float dedup_ratio  = safediv_float (blk_used,  blk_dedup);             // dedupe ratio
+  float used_ratio   = safediv_float (blk_used,  blk_total);             // % used vs free
+  float thin_ratio   = safediv_float (blk_total, blk_used);              // % free vs used (thin provisioning)
+  float bucket_ratio = safediv_float (blk_dedup, blk_rq);                // bucket compression ratio (sorted into slots)
+
+  // dump the formatted report
+  cout << setprecision(2) << fixed; // display float as xyz.ab
+  cout    << "                      " << w1 << "*** Details ***"
+  << endl << "blocksize           = " << w1 << to_string(blocksize/1024) + " KiB"
+  << endl << "total               = " << w1 << printMIB(blk_total.bytes())  << " (" << w2 << blk_total  << " blocks)"
+  << endl << "free                = " << w1 << printMIB(blk_free.bytes() )  << " (" << w2 << blk_free   << " blocks)"
+  << endl << "used                = " << w1 << printMIB(blk_used.bytes() )  << " (" << w2 << blk_used   << " blocks)"
+  << endl << "unique              = " << w1 << printMIB(blk_count1.bytes()) << " (" << w2 << blk_count1 << " blocks)"
+  << endl << "dupcount = 2        = " << w1 << printMIB(blk_count2.bytes()) << " (" << w2 << blk_count2 << " blocks)"
+  << endl << "dupcount > 2        = " << w1 << printMIB(blk_counth.bytes()) << " (" << w2 << blk_counth << " blocks)"
+  << endl << "deduped             = " << w1 << printMIB(blk_dedup.bytes())  << " (" << w2 << blk_dedup  << " blocks)" << endl;
+  for(int i=0;i<bucketrange;i++) if(buckets[i])
+    cout  << "buckets " << setw(2) << (2 << i) << "k         = "
+          << w1 << printMIB(buckets[i]*(bucketsize << i))
+          << " (" << w2 << buckets[i] << " buckets)" << endl;
+  cout    << "compressed (full)   = " << w1 << printMIB(bytes_comp)         << " (" << w2 << comp_ratio*100 << " %)"
+  << endl << "compressed (bucket) = " << w1 << printMIB(blk_rq.bytes())     << " (" << w2 << blk_rq     << " blocks)"
+  << endl << "                      " << w1 << "*** Summary ***"
+  << endl << "percentage used     = " << w1 << to_string(100*used_ratio,2)     << " %"
+  << endl << "percentage free     = " << w1 << to_string(100-100*used_ratio,2) << " %"
+  << endl << "deduplication ratio = " << w1 << to_string(dedup_ratio,2)
+  << endl << "compression ratio   = " << w1 << to_string(bucket_ratio,2)
+  << endl << "thin ratio          = " << w1 << to_string(thin_ratio,2)
+  << endl << "combined            = " << w1 << to_string(dedup_ratio*bucket_ratio*thin_ratio,2)
+  << endl << "raw capacity        = " << w1 << printMIB(blk_total.bytes())
+  << endl << "net capacity        = " << w1 << printMIB(blk_rq.bytes())
+  << endl;
+}
+
+//create table ttt (x integer, y integer);
+//sqlite> insert into ttt values (0,1024),(1025,2048),(2049,4096),(4097,8192),(8193,16384);
+
+void extreport() {
   dbase.open();
-  cout << endl << "File list:" << endl;
-  dbase.runquery("5,12,8,11","select id as File, blocks as Blocks, size/1024/1024 as MiB, name as Filename from files");
+  auto blksz = dbase.select_long(sql_blksz); // get blocksize from db
+  cout << endl;
+  dbase.sql("create temp table hist_c (min integer, max integer)"); // create temp table with min/max values for 'group by' query
+  sqlquery q_instmp(dbase, "insert into hist_c values(?,?)");
+  for(ulong i=0;i<blksz;i+=1024) q_instmp.exec(i+1,i+1024);
+
+  dbase.runquery("5,8,8,11","select id as File, blksz/1024 as Blksz, blocks as Blocks, size/1024/1024 as MiB, name as Filename from files,metadata");
   cout << endl << "Dedupe histogram:" << endl;
-  dbase.runquery("12,12","select v as 'Dupcount',count(v) as Blocks from kv where k!=0 group by 1 order by v");
+  dbase.runquery("12,12","select v as 'Dupcount',count(v) as Blocks,count(v)*(select blksz from metadata) as Bytes from kv where k!=0 group by 1 order by v");
   cout << endl << "Compression Histogram:" << endl;
-  dbase.runquery("12,12","select ((b-1)/512)*512+512 as 'Size (KB)',count(*) as Blocks from kv where k!=0 group by 1");
+  dbase.runquery("12,12","select max as 'Size(KB)',count(b) as Blocks,count(b)*max as Bytes from hist_c left outer join kv on kv.b between min and max group by max");
 }
 
 /*******************************************************************************
@@ -669,34 +771,39 @@ void xreport() {
 
 int main(int argc, char** argv) {
   cout << "qdda " << progversion << " - The Quick & Dirty Dedupe Analyzer" << endl;
-  int c;
-  while ((c = getopt(argc, (char **)argv, "DB:b:cdf:hi:knqrtvx?")) != -1) {
+  int c; const char * p = NULL;
+  while ((c = getopt(argc, (char **)argv, "B:DPT:ab:cdf:hi:nqrt::vx?")) != -1) {
     switch(c) {
-      case 'D': o_debug.open("/dev/tty");    break;
-      case 'B': set_blocksize(optarg);       break;
-      case 'b': p_bandwidth=atol(optarg);    break;
-      case 'c': p_nocompress = true;         break;
-      case 'd': p_dump       = true;         break;
-      case 'f': dbase.filename(optarg);      break;
-      case 'i': import(optarg); exit(0);     break;
-      case 'k': p_keep       = true;         break;
-      case 'n': p_dryrun     = true;         break;
-      case 'q': o_verbose.close();           break;
-      case 'r': p_noreport   = true;         break;
-      case 't': perftest();     exit(0);     break;
-      case 'v': showversion();               break;
-      case 'x': xreport();      exit(0);     break;
-      case 'h':
+      case 'B': set_blocksize     (optarg); break; // Change default blocksize
+      case 'D': o_debug.open("/dev/tty");   break; // Open debug stream
+      case 'P': p_vacuum  = true;           break; // Purge unused space in DB
+      case 'T': dbase.tempdir     (optarg); break; // Set SQLite tempdir
+      case 'a': p_append  = true;           break; // Keep existing DB data, append new
+      case 'b': p_bandwidth=atol  (optarg); break; // Limit bandwidth
+      case 'c': p_nocomp  = true;           break; // Disable compression
+      case 'd': p_dump    = true;           break; // Dump hashes
+      case 'f': dbase.filename    (optarg); break; // Set DB filename
+      case 'i': p_import  = true; p=optarg; break; // Import from another database
+      case 'n': p_dryrun  = true;           break; // Don't update DB
+      case 'q': o_verbose.close();          break; // Be quiet (no status updates)
+      case 'r': p_norep   = true;           break; // Skip report and merge
+      case 't': p_test    = true; p=optarg; break; // Performance test
+      case 'v': p_version = true;           break; // Show version
+      case 'x': p_xrep    = true;           break; // Extended report
+      case 'h':                                    // Help
       case '?': showusage(); exit(0);
       default : showusage(); exit(10) ;
     }
   }
+  if(p_vacuum)  { vacuum()      ; exit(0); }
+  if(p_import)  { import(p)     ; exit(0); }
+  if(p_version) { showversion() ; exit(0); }
+  if(p_xrep)    { extreport()   ; exit(0); }
+  if(p_test)    { perftest(p)   ; exit(0); }
   if(optind<argc || !isatty(fileno(stdin)) ) {                 // process files if we have files or stdin
-    if (p_keep==false) { file_delete(dbase.filename()); }      // delete database file at start
+    if (p_append==false) file_delete(dbase.filename());        // delete database file at start
     if (!isatty(fileno(stdin)))         analyze("/dev/stdin"); // analyze from stdin if not console
     for (int i = optind; i < argc; ++i) analyze(argv[i]);      // analyze the rest of the files
-    if(!p_noreport) report();
-  } else {
-    if(!p_noreport) report();                                  // No input - only print report
   }
+  if(!p_norep) report();
 }
