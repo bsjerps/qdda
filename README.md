@@ -15,17 +15,17 @@ Other features:
 
 - Can scan live environments (such as prod database servers)
 - Can read from named/unnamed pipes - which allows qdda to run as non-root user
-- Blocksize adjustable between 1KiB and 64KiB
+- Blocksize adjustable between 1K and 128K
 - Built-in IO throttle to avoid overloading production systems (default 200MB/s)
 - Can merge (combine) results from different nodes (i.e. distributed storage environments)
 - Scales to datasets of multiple terabytes (tested 3+TB) although it may take a while
 - Can report compression and deduplication histograms
-- Scan speed on Intel i5-4440 is about 500MB/s. (single threaded)
+- Scan speed on Intel i5-4440 is about 400MB/s. (single threaded)
 - Data processing speed (DB index+merge) ~ 2000MB/s but will slow down a bit with large datasets
 - The SQLite database can be queried with standard SQLite tools
 
 Space requirements for database: Expect 16GiB for 4TiB scanned data @ 8K blocksize (1:250). 
-You also need additional temp space for SQLite (worst case is vacuum requiring another 16GiB).
+You also need additional temp space for SQLite (worst case is SQLite "vacuum" requiring another 16GiB).
 
 Wiki page: http://outrun.nl/wiki/qdda
 
