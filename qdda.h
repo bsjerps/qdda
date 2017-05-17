@@ -22,7 +22,6 @@
 #include <sqlite3.h>
 #include <unistd.h>
 #include <lz4.h>
-#include <openssl/md5.h>
 
 /*******************************************************************************
  * notes

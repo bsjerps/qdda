@@ -20,18 +20,25 @@
  * 1.7.1 - Minor bugfixes, improved long report, improved progress indicator,
  *         -a (append) option replaces -k (keep)
  * 1.7.2 - Fix rounding error, minor output changes
+ * 1.7.3 - Replace openssl with compiled-in MD5 function (no dependency 
+ *         on ssl libs). Increased max blocksize to 128K
  * ---------------------------------------------------------------------------
  * Build notes: Requires lz4 >= 1.7.1
  ******************************************************************************/
 
 #include "qdda.h"
+
+extern "C" {
+#include "md5.h"
+}
+
 using namespace std;
 
 /*******************************************************************************
  * global parameters - modify at own discretion
  ******************************************************************************/
 
-const char  *progversion   = "1.7.2";
+const char  *progversion   = "1.7.3";
 const char  *dbpath        = "/var/tmp/qdda.db"; // default database location
 const char  *tmppath       = "/var/tmp";         // tmpdir for SQLite temp files
 const ulong blockspercycle = 64;                 // read chunk blocks at a time when throttling
@@ -46,7 +53,7 @@ const int   bucketsize     = 2048;               // Minimum bucketsize
  ******************************************************************************/
 
 const ulong mebibyte      = 1048576; // Bytes per MiB
-const ulong max_blocksize = 65536;   // max allowed blocksize
+const ulong max_blocksize = 131072;  // max allowed blocksize
 const int   bucketrange   = bindepth(max_blocksize/bucketsize); // array size for buckets
 
 /*******************************************************************************
@@ -211,13 +218,15 @@ int file_exists(string& fn) {
 
 // returns the least significant 6 bytes of the md5 hash (16 bytes) as unsigned long
 ulong hash6_md5(const char * buf, const int size) {
-  unsigned char digest[16];
-  const unsigned char * ubuf = (unsigned char *)buf;
+  static unsigned char digest[16];
   static int f = 0;
   static char zerobuf[max_blocksize];                             // allocate static buffer (once)
   if(!f) { memset(zerobuf,0,max_blocksize); f=1; }                // force hash=0 for zero block
   if(memcmp (buf,zerobuf,size)==0) return 0;                      // return 0 for zero block
-  MD5(ubuf,size,digest);                                          // get MD5 (as string)
+  MD5_CTX ctx;  
+  MD5_Init(&ctx);
+  MD5_Update(&ctx, buf, size);
+  MD5_Final(digest, &ctx);
   return                            // ignore chars 0-9
   /*((ulong)digest[9]  << 48) +*/   // enable this for 56-bit hashes vs 48-bit
     ((ulong)digest[10] << 40) +     // convert char* to ulong but keeping
@@ -640,13 +649,14 @@ void speedtest() {
   char       *testdata   = new char[bufsize];
   auto        clockstart = clocknow;
 
-  srand(1);
-  memset(testdata,0,bufsize);                              // clear buffer
-  for(ulong i=0;i<bufsize;i++) testdata[i] = (char)rand() % 256; // fill test buffer with random data
-  dbase.open();
-
   cout << fixed << setprecision(2);
   cout << "Test set:    " << w1 << rowspergb << " blocks, 8k (" << bufsize/mebibyte << " MiB)" << endl;
+
+  // initialize
+  srand(1);
+  memset(testdata,0,bufsize);
+  for(ulong i=0;i<bufsize;i++) testdata[i] = (char)rand() % 256; // fill test buffer with random data
+  dbase.open();
 
   // test hashing performance
   clockstart = clocknow;

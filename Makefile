@@ -9,11 +9,11 @@
 prefix = /usr/local
 
 # CFLAGS  += -Wno-unused-but-set-variable
-CFLAGS  += -Wall
-CFLAGS  += -std=c++0x
-CFLAGS  += -O2
-LIBS     = -lsqlite3 -lstdc++ -lcrypto
-STATIC   = /usr/lib64/liblz4.a
+CFLAGS    += -Wall
+CXXFLAGS  += -std=c++0x
+CFLAGS    += -O3
+LIBS       = -lsqlite3 -lstdc++
+STATIC     = /usr/lib64/liblz4.a
 
 all: qdda
 
@@ -23,11 +23,14 @@ all: qdda
 # older versions of LIBC and STDC++ libraries.
 # LZ4 needs to be version 1.31 (or higher).
 
-qdda: qdda.o
-	g++ $(LDFLAGS) qdda.o $(LIBS) $(STATIC) -o qdda 
+qdda: qdda.o md5.o
+	g++ $(LDFLAGS) qdda.o md5.o $(LIBS) $(STATIC) -o qdda 
 
 qdda.o: qdda.cpp
-	g++ -c $(CFLAGS) qdda.cpp
+	g++ -c $(CXXFLAGS) $(CFLAGS) qdda.cpp
+
+md5.o: md5.c
+	gcc -c $(CFLAGS) md5.c
 
 clean:
 	rm -rf *.o qdda
