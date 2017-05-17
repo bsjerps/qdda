@@ -19,6 +19,7 @@
  * 1.7.0 - Change to MD5, performance improvements, tmpdir, improved reports
  * 1.7.1 - Minor bugfixes, improved long report, improved progress indicator,
  *         -a (append) option replaces -k (keep)
+ * 1.7.2 - Fix rounding error, minor output changes
  * ---------------------------------------------------------------------------
  * Build notes: Requires lz4 >= 1.7.1
  ******************************************************************************/
@@ -30,7 +31,7 @@ using namespace std;
  * global parameters - modify at own discretion
  ******************************************************************************/
 
-const char  *progversion   = "1.7.1";
+const char  *progversion   = "1.7.2";
 const char  *dbpath        = "/var/tmp/qdda.db"; // default database location
 const char  *tmppath       = "/var/tmp";         // tmpdir for SQLite temp files
 const ulong blockspercycle = 64;                 // read chunk blocks at a time when throttling
@@ -530,7 +531,7 @@ void merge() {
   auto mibst  = rowsst*blksz/mebibyte;
   auto mibkv  = rowskv*blksz/mebibyte;
   if(!rowsst) return;
-  o_verbose << "Adding " << rowsst << " blocks (" << mibst << " MiB) with " << rowskv << " blocks (" << mibkv << " MiB)" << endl;
+  o_verbose << "Merging " << rowsst << " blocks (" << mibst << " MiB) with " << rowskv << " blocks (" << mibkv << " MiB)" << endl;
   ss1 << "Indexing" << flush;
   showprogress(ss1.str());
   auto t_begin = clocknow;
@@ -540,7 +541,7 @@ void merge() {
   ulong index_rps  = rowsst*1000000/time_index;
   ulong index_mbps = mibst*1000000/time_index;
   ss1 << " in " << setprecision(2) << fixed << index_sec << " sec (" << index_rps << " blocks/s, " << index_mbps << " MiB/s)";
-  ss2 << ss1.str() << ", Merging" << flush;
+  ss2 << ss1.str() << ", Joining" << flush;
   showprogress(ss2.str());
   t_begin = clocknow;
   dbase.sql(sql_merge);
@@ -708,7 +709,7 @@ void report() {
     int max = (bucketsize << i);
     int min = i?(1024<<i)+1:1;
     buckets[i]=q_buckets.exec(min,max);
-    blocks[i]=buckets[i]*max/blocksize;
+    blocks[i]=divup(buckets[i]*max,blocksize);
     blk_rq = blk_rq + blocks[i];
   }
   // calc ratios - divide by zero results in value 0
@@ -746,9 +747,6 @@ void report() {
   << endl << "net capacity        = " << w1 << printMIB(blk_rq.bytes())
   << endl;
 }
-
-//create table ttt (x integer, y integer);
-//sqlite> insert into ttt values (0,1024),(1025,2048),(2049,4096),(4097,8192),(8193,16384);
 
 void extreport() {
   dbase.open();
