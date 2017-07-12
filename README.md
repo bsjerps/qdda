@@ -2,14 +2,11 @@
 The Quick and Dirty Deduplication Analyzer
 
 QDDA checks files, named pipes or block devices for duplicate blocks to estimate 
-deduplication efficiency on dedupe capable storage systems such as DellEMC XtremIO. 
+deduplication efficiency on dedupe capable All-Flash Arrays. 
 It also estimates compression ratios.
 
 QDDA uses MD5 hashing and LZ4 compression and stores hash values, hash counts and
 compressed bytes counts in SQLite database format.
-
-Although written for XtremIO, deduplication estimates should also be valid for any
-storage platform that has block deduplication, for example ZFS.
 
 Other features:
 
