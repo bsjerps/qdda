@@ -22,6 +22,8 @@
  * 1.7.2 - Fix rounding error, minor output changes
  * 1.7.3 - Replace openssl with compiled-in MD5 function (no dependency 
  *         on ssl libs). Increased max blocksize to 128K
+ * 1.8.0 - Updated compression support, default blocksize now 16K
+ * 1.8.2 - Bugfixes, updated reporting & documentation
  * ---------------------------------------------------------------------------
  * Build notes: Requires lz4 >= 1.7.1
  ******************************************************************************/
@@ -38,7 +40,7 @@ using namespace std;
  * global parameters - modify at own discretion
  ******************************************************************************/
 
-const char  *progversion   = "1.7.3";
+const char  *progversion   = "1.8.2";
 const char  *dbpath        = "/var/tmp/qdda.db"; // default database location
 const char  *tmppath       = "/var/tmp";         // tmpdir for SQLite temp files
 const ulong blockspercycle = 64;                 // read chunk blocks at a time when throttling
@@ -46,7 +48,6 @@ const ulong updateinterval = 10000;              // progress report every N bloc
 const ulong commitinterval = 20000;              // commit every N blocks (rows)
 const int   col1w          = 15;                 // 1st column - max 9TB without messing up
 const int   col2w          = 10;                 // 2nd column
-const int   bucketsize     = 2048;               // Minimum bucketsize
 
 /*******************************************************************************
  * Constants - don't touch
@@ -54,7 +55,6 @@ const int   bucketsize     = 2048;               // Minimum bucketsize
 
 const ulong mebibyte      = 1048576; // Bytes per MiB
 const ulong max_blocksize = 131072;  // max allowed blocksize
-const int   bucketrange   = bindepth(max_blocksize/bucketsize); // array size for buckets
 
 /*******************************************************************************
  * Initialization - globals
@@ -75,7 +75,7 @@ bool   p_vacuum     = false;  // run vacuum
 bool   p_test       = false;  // run perftest
 bool   p_xrep       = false;  // run extended report
 bool   p_version    = false;  // run version info
-ulong  p_blksz      = 8192;   // default blocksize
+ulong  p_blksz      = 16384;  // default blocksize
 ulong  p_bandwidth  = 200;    // default bandwidth throttle (MB/s)
 
 // class blockval stuff
@@ -94,7 +94,7 @@ There is NO WARRANTY, to the extent permitted by law.
 )";
 
 string usage_text = R"(
-Usage: qdda [-D] [-B blksize] [-b <bandw>] [-c] [-d] [-f <dbpath>] [-i importdb] [-k] [-n] [-q] [-r] [-t [gb]] [-v] [-x] [file list]
+Usage: qdda [-D] [-B blksize] [-b <bandw>] [-c] [-d] [-f <dbpath>] [h|H] [-i importdb] [-k] [-n] [-q] [-r] [-t [gb]] [-v] [-x] [file list]
   -D (debug)        : Show lots of annoying debug info
   -B <blksize_kb>   : Set blocksize to blksize_kb kilobytes
   -P (purge)        : Reclaim unused space in database (sqlite vacuum)
@@ -111,6 +111,8 @@ Usage: qdda [-D] [-B blksize] [-b <bandw>] [-c] [-d] [-f <dbpath>] [-i importdb]
   -t<size_gb>       : Run raw performance test (no opts) or merge test (data size in GB)
   -v (version)      : print version and copyright info
   -x (eXtended)     : Extended report (file info and histograms)
+  -h or ? (help)    : This help
+  -H Long help      : More detailed information, tips & tricks
 
 qdda is safe to run even on files/devices that are in use. It opens streams read-only and cannot modify any files.
 It writes to a database file that needs to be either newly created or a pre-existing SQLite3 database.
@@ -126,11 +128,9 @@ unique              = Blocks that only appear once (non-dedupable)
 dupcount = 2        = Blocks that appear exactly 2 times
 dupcount > 2        = Blocks that appear more than 2 times (more detail: run histograms)
 deduped             = Required capacity after deduplication
-buckets 2k          = Compressed blocks that fit in 2k slots (4 per 8K block)
-buckets 4k          = Compressed blocks that fit in 4k slots (2 per 8K block)
-buckets 8k          = Compressed blocks that fit in 8k slots (1 per 8K block)
-compressed (full)   = Sum of compressed block bytes (compressed with LZ4)
-compressed (bucket) = Sum of bucket sizes (compressed and sorted in buckets)
+compressed (bytes)  = Sum of compressed block bytes (compressed with LZ4)
+compressed (block)  = Sum of bucket sizes (compressed and sorted in buckets)
+uncompressed        = Same as deduped (if blocksize is not 8K or 16K)
 Summary:
 percentage used     = Percentage used/total (logical capacity, before optimization)
 percentage free     = Percentage free/total (logical capacity, before optimization)
@@ -144,8 +144,120 @@ net capacity        = Total required capacity (same as required)
 More info: http://outrun.nl/wiki/qdda
 )";
 
+string help_text = R"(
+
+How qdda works:
+
+Each stream (file or pipe) is scanned where each block is hashed and compressed.
+
+The results (hash,compressed_bytes) go into a staging table. At the end of processing, the
+staging data is merged into the main kv table (which actually holds 3 columns, hash - count - compressed_bytes).
+
+The report is then generated by querying the kv table.
+
+Hashing:
+
+The hash value is a 6-byte truncated MD5 sum (tradeoff between database limits, efficiency
+and low chance of hash collisions when scanning very large data sets).
+Although storage arrays typically use the SHA algorithm with higher number of bits, MD5 has
+better performance, and a very low amount of collisions will not impact the results or cause data corruption.
+
+Compression:
+
+Some All-Flash arrays use "bucket" compression to achieve high throughput, low overhead and good compression. 
+qdda simulates compression uzing LZ4 compression. LZ4 has very high throughput and the compression ratios
+are very close to what All-Flash Arrays can achieve.
+
+Bucket Compression:
+
+QDDA will use "simple" bucket compression when using 8K blocksize. The bucket sizes are 2KB, 4KB and 8KB.
+A block that compresses into 2048 bytes or less goes in a 2K slot, 2049 bytes to 4096 in a 4K slot,
+and anything else does not get compressed at all and goes in an 8K slot.
+
+With 16K blocksize it is possible to have more bucket variations so we use all bucket sizes between 1K and 16K
+like the latest generations of leading AFAs can do - resulting in even better compression.
+
+
+Throttling:
+
+qdda processes 64 blocks per cycle and measures the service time. If the service time is too low it means the throughput is
+higher than the bandwidth limit. The CPU is put to sleep for a number of microseconds to match the overall bandwidth limit.
+
+Blocksize:
+
+The default blocksize is 16KiB to match modern All flash Arrays. The block size is stored in metadata and only datasets
+with matching blocksizes can be merged. qdda reports simple compression if a blocksize of 8K is detected, or advanced if
+the default 16K is detected, and will not report compression ratios with other blocksizes.
+
+Performance and sizing:
+
+The staging table requires about 20 bytes per scanned block. With a blocksize of 16K this means
+1 TiB = 67 108 864 blocks requires about 1.3 GB for staging.
+
+Merging requires a lot of temp space in the database - expect the database to expand by a factor of 4.
+So using default blocksize expect to require 5GB per TB scanned. After the merge phase you may want to reclaim capacity in the
+database using the Purge option.
+
+Merge performance: The database internally has to count, sort and join a lot of rows (each block is a row in the staging database).
+This may take a while (up to hours when scanning data sets of multiple terabytes). Performance depends on CPU and I/O speed.
+
+You may speed up I/O by altering the default database location from /var/tmp/qdda.db to another path. You can also set the SQLite
+TEMP dir to an alternative location (also if you run out of diskspace).
+
+You can avoid the merge (join/sort) phase and delay it to a later moment using the "-r" (no report) option. Ideal if you scan on
+a slow server with limited space and you want to do the heavy lifting on a faster host later.
+
+Merging datasets:
+
+You may want to scan data and analyze dedupe ratios across different hosts. You can scan each host separately and then later combine
+the databases by using the import option (add data of 2nd database to the primary). 
+Tip: Purging each database before processing will save space and make data transfers a bit easier. 
+The block sizes of both databases should match.
+
+Adding new streams/files to an existing database:
+
+Use the "-a" (append) option to avoid overwriting the existing database.
+
+Dump: if you want to find out why certain blocks will or will not duplicate against each other, you can run the Dump (-d) option.
+Beware that this slows down the scan process significantly because every block hash and compressed size will be listed to the console.
+Ideally you should only use this for small size test scenarios.
+
+Extended reports:
+
+The -x (extended reports) option provides deep insight in deduplication and compression. The deduplication histogram shows detailed distribution
+of dedupe counts i.e. how many unique blocks are in the dataset, how many with 2 identical copies, with 3 etc.
+
+The Compression histogram shows the detailed bucket allocation for simple (8KB) or advanced (16KB blocksize) compression. 
+
+Run as non-privileged user:
+
+You can do stuff like
+sudo cat /dev/sda | qdda
+as non-privileged user. You can also use named pipes:
+# mkfifo /tmp/pipe_sda
+# cat /dev/sda > /tmp/pipe_sda
+# su - foobar
+$ qdda /tmp/pipe_sda
+
+Or over a network pipe:
+source host: cat /dev/sda | nc targethost 19000
+target host: nc -l 19000 | qdda
+
+Custom queries:
+
+The database is standard SQLite and if you want to run your own queries, you can. Just type "sqlite /var/tmp/qdda.db" and you can run any SQLite
+statement you like.
+
+Troubleshooting:
+
+If you don't get the dedupe results you expect, make sure you have the correct block alignment. Especially with (unnamed) pipes this can be tricky.
+If blocks are shifted by just one byte, then all hashes will be different and analyzing two streams will result zero deduplication effect.
+
+)";
+
 void showversion() { cout << version_info << endl; exit(0); }
 void showusage()   { cout << usage_text << endl; }
+void longhelp()    { cout << help_text << endl; }
 
 /*******************************************************************************
  * SQL query text
@@ -162,6 +274,8 @@ CREATE TABLE IF NOT EXISTS metadata(lock char(1) not null default 1, blksz integ
 CREATE TABLE IF NOT EXISTS files(id integer primary key autoincrement, name TEXT, blocks integer, size integer);
 CREATE TABLE IF NOT EXISTS kv(k unsigned integer primary key, v integer, b integer);
 CREATE TABLE IF NOT EXISTS staging(k integer, b integer);
+CREATE TABLE IF NOT EXISTS comp_x1 (min integer primary key, max integer);
+CREATE TABLE IF NOT EXISTS comp_x2 (min integer primary key, max integer);
 )";
 
 const char *sql_optimize = "PRAGMA journal_mode = off;PRAGMA synchronous = OFF";
@@ -393,6 +507,7 @@ ulong sqlquery::exec(const ulong p1, const ulong p2,const ulong p3) {
 // Open database and create tables if needed
 int sqlitedb::open() {
   int rc = 0;
+  uint min,max;
   if(db) return 0;
   rc = sqlite3_open(fn.c_str(), &db);
   if(rc) {
@@ -408,6 +523,17 @@ int sqlitedb::open() {
     auto blksz = select_long(sql_blksz);
     if(!blksz) sql("insert into metadata (blksz) values (" + to_string(p_blksz) + ")");
     o_debug << "DB opened: " << fn << endl;
+    // sqlite 3.6 cannot insert multiple pairs at once
+    sql("INSERT OR REPLACE INTO comp_x1 values (   1,2048)");
+    sql("INSERT OR REPLACE INTO comp_x1 values (2049,4096)");
+    sql("INSERT OR REPLACE INTO comp_x1 values (4097,8192)");
+    for(int i=0;i<=15;i++) {
+      stringstream qq;
+      min=i*1024+1;
+      max=(i+1)*1024;
+      qq << "INSERT OR REPLACE INTO comp_x2 values (" << min << "," << max << ")" << endl;
+      sql(qq.str());
+    }
   }
   return(rc);
 }
@@ -500,6 +626,28 @@ int sqlitedb::runquery(const char * tabstr,const string& query) {
   int rc = sqlite3_exec(db, query.c_str(), callback, (void*)&r, &zErrMsg);
   cout << r.header << endl << r.data << endl;
   return rc;
+}
+
+// run SQL statement, return sum of all values returned
+ulong sqlitedb::select_lsum(const string& query) {
+  auto         t_start = clocknow;
+  int          rc      = 0;
+  ulong        retval  = 0;
+  sqlite3_stmt *stmt   = 0;
+  const char   *pzTest = NULL;
+  o_debug << "query=" << query << flush;
+  if(db==0) die("Query on closed database");
+  rc = sqlite3_prepare_v2(db, query.c_str(), strlen(query.c_str()), &stmt, &pzTest);
+  if(rc!=SQLITE_OK) die("SQL prepare error: " + query);
+  rc=sqlite3_step(stmt);
+  while(rc==SQLITE_ROW) { 
+    retval += sqlite3_column_int64(stmt, 0);
+    rc=sqlite3_step(stmt);
+  }
+  sqlite3_finalize(stmt);
+  auto t_diff = clockdiff(clocknow,t_start);
+  o_debug << ", runtime " << t_diff << " microsec (" << to_string((float)t_diff/1000000,2) << " s)" << endl;
+  return retval;
 }
 
 // run SQL statement, return longint value (select)
@@ -643,7 +791,7 @@ void mergetest(ulong gb) {
 
 // test hashing, compression and insert performance
 void speedtest() {
-  const ulong blocksize  = 8192;
+  const ulong blocksize  = 16384;
   const ulong rowspergb  = 131072;
   const ulong bufsize    = 1024 * mebibyte;
   char       *testdata   = new char[bufsize];
@@ -701,9 +849,8 @@ void report() {
   dbase.open();                // open db if it wasn't open already
   os_reset();                  // reset std::cout state
   merge();                     // merge staging data if any
-  ulong buckets[bucketrange];  // compression buckets
-  ulong blocks[bucketrange];   // compression blocks (each block holds x buckets where x=blocksize/bucketsize)
-  sqlquery q_buckets(dbase, "select count(*) from kv where b between ? and ?");
+  string comp_method;          // Report compression method
+
   auto     blocksize   = dbase.select_long("select blksz from metadata");                         // Blocksize used when scanning
   blockval blk_total   = dbase.select_long("select sum(v) from kv");                              // Total scanned blocks
   blockval blk_free    = dbase.select_long("select v from kv where k=0");                         // Total zero blocks
@@ -715,13 +862,13 @@ void report() {
   auto     bytes_comp  = dbase.select_long("select sum(b)   from kv where k!=0");                 // Total bytes after full compression
   blockval::setblocksize(blocksize);
   blockval blk_rq;
-  for(int i=0;i<bucketrange;i++) { // calc compression buckets
-    int max = (bucketsize << i);
-    int min = i?(1024<<i)+1:1;
-    buckets[i]=q_buckets.exec(min,max);
-    blocks[i]=divup(buckets[i]*max,blocksize);
-    blk_rq = blk_rq + blocks[i];
+
+  switch(blocksize) {
+    case 8192  : blk_rq = dbase.select_lsum("select count(b)*max/(select blksz from metadata) from comp_x1 left outer join kv on kv.b between min and max group by max"); break;
+    case 16384 : blk_rq = dbase.select_lsum("select count(b)*max/(select blksz from metadata) from comp_x2 left outer join kv on kv.b between min and max group by max"); break;
+    default: blk_rq = blk_dedup;
   }
+
   // calc ratios - divide by zero results in value 0
   float comp_ratio   = 1 - safediv_float (bytes_comp,blk_dedup.bytes()); // full compression ratio
   float dedup_ratio  = safediv_float (blk_used,  blk_dedup);             // dedupe ratio
@@ -733,19 +880,17 @@ void report() {
   cout << setprecision(2) << fixed; // display float as xyz.ab
   cout    << "                      " << w1 << "*** Details ***"
   << endl << "blocksize           = " << w1 << to_string(blocksize/1024) + " KiB"
-  << endl << "total               = " << w1 << printMIB(blk_total.bytes())  << " (" << w2 << blk_total  << " blocks)"
-  << endl << "free                = " << w1 << printMIB(blk_free.bytes() )  << " (" << w2 << blk_free   << " blocks)"
-  << endl << "used                = " << w1 << printMIB(blk_used.bytes() )  << " (" << w2 << blk_used   << " blocks)"
-  << endl << "unique              = " << w1 << printMIB(blk_count1.bytes()) << " (" << w2 << blk_count1 << " blocks)"
-  << endl << "dupcount = 2        = " << w1 << printMIB(blk_count2.bytes()) << " (" << w2 << blk_count2 << " blocks)"
-  << endl << "dupcount > 2        = " << w1 << printMIB(blk_counth.bytes()) << " (" << w2 << blk_counth << " blocks)"
-  << endl << "deduped             = " << w1 << printMIB(blk_dedup.bytes())  << " (" << w2 << blk_dedup  << " blocks)" << endl;
-  for(int i=0;i<bucketrange;i++) if(buckets[i])
-    cout  << "buckets " << setw(2) << (2 << i) << "k         = "
-          << w1 << printMIB(buckets[i]*(bucketsize << i))
-          << " (" << w2 << buckets[i] << " buckets)" << endl;
-  cout    << "compressed (full)   = " << w1 << printMIB(bytes_comp)         << " (" << w2 << comp_ratio*100 << " %)"
-  << endl << "compressed (bucket) = " << w1 << printMIB(blk_rq.bytes())     << " (" << w2 << blk_rq     << " blocks)"
+  << endl << "total               = " << w1 << printMIB(blk_total.bytes())        << " (" << w2 << blk_total  << " blocks)"
+  << endl << "free                = " << w1 << printMIB(blk_free.bytes() )        << " (" << w2 << blk_free   << " blocks)"
+  << endl << "used                = " << w1 << printMIB(blk_used.bytes() )        << " (" << w2 << blk_used   << " blocks)"
+  << endl << "unique              = " << w1 << printMIB(blk_count1.bytes())       << " (" << w2 << blk_count1 << " blocks)"
+  << endl << "dupcount = 2        = " << w1 << printMIB(blk_count2.bytes())       << " (" << w2 << blk_count2 << " blocks)"
+  << endl << "dupcount > 2        = " << w1 << printMIB(blk_counth.bytes())       << " (" << w2 << blk_counth << " blocks)"
+  << endl << "deduped             = " << w1 << printMIB(blk_dedup.bytes())        << " (" << w2 << blk_dedup  << " blocks)" << endl;
+
+  
+  cout    << "compressed (bytes)  = " << w1 << printMIB(bytes_comp)         << " (" << w2 << comp_ratio*100 << " %)"
+  << endl << "compressed (block)  = " << w1 << printMIB(blk_rq.bytes())     << " (" << w2 << blk_rq     << " blocks)"
   << endl << "                      " << w1 << "*** Summary ***"
   << endl << "percentage used     = " << w1 << to_string(100*used_ratio,2)     << " %"
   << endl << "percentage free     = " << w1 << to_string(100-100*used_ratio,2) << " %"
@@ -762,15 +907,16 @@ void extreport() {
   dbase.open();
   auto blksz = dbase.select_long(sql_blksz); // get blocksize from db
   cout << endl;
-  dbase.sql("create temp table hist_c (min integer, max integer)"); // create temp table with min/max values for 'group by' query
-  sqlquery q_instmp(dbase, "insert into hist_c values(?,?)");
-  for(ulong i=0;i<blksz;i+=1024) q_instmp.exec(i+1,i+1024);
-
   dbase.runquery("5,8,8,11","select id as File, blksz/1024 as Blksz, blocks as Blocks, size/1024/1024 as MiB, name as Filename from files,metadata");
   cout << endl << "Dedupe histogram:" << endl;
   dbase.runquery("12,12","select v as 'Dupcount',count(v) as Blocks,count(v)*(select blksz from metadata) as Bytes from kv where k!=0 group by 1 order by v");
-  cout << endl << "Compression Histogram:" << endl;
-  dbase.runquery("12,12","select max as 'Size(KB)',count(b) as Blocks,count(b)*max as Bytes from hist_c left outer join kv on kv.b between min and max group by max");
+  if(blksz==8192) {
+    cout << endl << "Compression Histogram (simple bucket):" << endl;
+    dbase.runquery("12,12","select substr('00000'||min,-5,5)||'-'||substr('00000'||max,-5,5) as 'Size(Bytes)',count(b) as Buckets,count(b)*max as Bytes from comp_x1 left outer join kv on kv.b between min and max group by max");
+  } else if (blksz==16384) {
+    cout << endl << "Compression Histogram (advanced):" << endl;
+    dbase.runquery("12,12","select substr('00000'||min,-5,5)||'-'||substr('00000'||max,-5,5) as 'Size(Bytes)',count(b) as Buckets,count(b)*max as Bytes from comp_x2 left outer join kv on kv.b between min and max group by max");
+  }
 }
 
 /*******************************************************************************
@@ -778,9 +924,10 @@ void extreport() {
  ******************************************************************************/
 
 int main(int argc, char** argv) {
-  cout << "qdda " << progversion << " - The Quick & Dirty Dedupe Analyzer" << endl;
+  cout << "qdda " << progversion << " - The Quick & Dirty Dedupe Analyzer" 
+       << endl << "Use for educational purposes only - actual array reduction results may vary" << endl;
   int c; const char * p = NULL;
-  while ((c = getopt(argc, (char **)argv, "B:DPT:ab:cdf:hi:nqrt::vx?")) != -1) {
+  while ((c = getopt(argc, (char **)argv, "B:DPT:ab:cdf:hHi:nqrt::vx?")) != -1) {
     switch(c) {
       case 'B': set_blocksize     (optarg); break; // Change default blocksize
       case 'D': o_debug.open("/dev/tty");   break; // Open debug stream
@@ -798,6 +945,7 @@ int main(int argc, char** argv) {
       case 't': p_test    = true; p=optarg; break; // Performance test
       case 'v': p_version = true;           break; // Show version
       case 'x': p_xrep    = true;           break; // Extended report
+      case 'H': longhelp(); exit(0);               // Long help
       case 'h':                                    // Help
       case '?': showusage(); exit(0);
       default : showusage(); exit(10) ;
