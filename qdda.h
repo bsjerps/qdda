@@ -79,6 +79,7 @@ public:
   void         close()                        { if(db) { sqlite3_close(db); db = 0; }}
   void         checkpoint (void);
   ulong        select_long(const std::string& query);
+  ulong        select_lsum(const std::string& query);
   int          runquery(const char *,const std::string&);
   void         sql(const std::string& query);
 };
