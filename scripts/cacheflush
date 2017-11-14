@@ -1,6 +1,0 @@
-#!/bin/bash
-
-# This flushes cached write buffers to disk
-
-sync
-echo 3 > /proc/sys/vm/drop_caches
