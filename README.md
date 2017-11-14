@@ -42,12 +42,12 @@ Either copy the /usr/bin/qdda binary from the RPM package or build from source.
 Building from source
 
 Build prerequisites: sqlite-devel lz4-devel lz4-static
-`
+```
 wget https://github.com/outrunnl/qdda/archive/master.zip
 unzip master.zip 
 cd qdda-master/
 make install
-`
+```
 
 ## Usage
 
