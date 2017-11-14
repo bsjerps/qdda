@@ -32,10 +32,10 @@ instructions.
 
 Enterprise Linux systems (RHEL-based):
 
-# Install the Outrun Extras repository
+- Install the Outrun Extras repository
 yum install http://yum.outrun.nl/outrun-extras.rpm
 
-# Install qdda from repo
+- Install qdda from repo
 yum install qdda
 
 Non-EL based:
