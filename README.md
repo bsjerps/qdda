@@ -21,9 +21,6 @@ Other features:
 - Data processing speed (DB index+merge) ~ 2000MB/s but will slow down a bit with large datasets
 - The SQLite database can be queried with standard SQLite tools
 
-Space requirements for database: Expect 16GiB for 4TiB scanned data @ 8K blocksize (1:250). 
-You also need additional temp space for SQLite (worst case is SQLite "vacuum" requiring another 16GiB).
-
 Wiki page: http://outrun.nl/wiki/qdda
 
 Installation: qdda is built and packaged for EL6 (CentOS, RHEL etc). See wiki page for download
