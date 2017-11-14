@@ -1,0 +1,80 @@
+#!/bin/bash
+#============================================================================
+# Title       : acl-qdda
+# Description : Set extended ACL read permissions on disks for a user
+# Author      : Bart Sjerps <bart@outrun.nl>
+# License     : GPLv3+
+# ---------------------------------------------------------------------------
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License at <http://www.gnu.org/licenses/> for
+# more details.
+# ---------------------------------------------------------------------------
+# Revision history:
+# 2017-11-09 : Created
+# ---------------------------------------------------------------------------
+
+usage() {
+  cat <<- EOF
+	$(basename $0) [-n] <action> <disk(s)>
+	  list        : list acls on <disks>
+	  reset       : remove extended ACLs on <disks>
+	  user=<user> : set readonly ACL for user on <disks>
+	  -n          : dryrun (show only commands)
+	EOF
+}
+
+#============================================================================
+# Initialization - Logging - Etc.
+# ---------------------------------------------------------------------------
+
+die() { echo "$(basename $0) error: $@" >&2 ; exit ${rc:-99} ; }
+
+test -x /usr/bin/setfacl || die "setfacl not available (run yum install acl)"
+test -x /usr/bin/getfacl || die "getfacl not available (run yum install acl)"
+
+aclset() {
+  user=$1 ; shift
+  dev=$1 ; shift
+  getent passwd ${user:-none} &>/dev/null || die "User $user does not exist"
+  cmd="setfacl -m u:$user:r $dev"
+  test -n "$DRYRUN" && echo $cmd || $cmd
+}
+
+aclreset() {
+  dev=$1; shift
+  cmd="setfacl -b $dev"
+  test -n "$DRYRUN" && echo $cmd || $cmd
+}
+
+#============================================================================
+# Main section - parsing options etc
+# ---------------------------------------------------------------------------
+while getopts ":hn" OPT; do
+  case "$OPT" in
+      n) DRYRUN=Y ;;
+   \?|h) usage >&2 ; exit 1 ;;
+  esac
+done
+shift $(expr $OPTIND - 1)
+
+ACTION=$1; shift
+
+test $# -eq 0 && usage && exit 0
+
+for dev in "$@"; do
+  test -b $dev || die "$dev is not a block device"
+  case $ACTION in
+    list)   getfacl -pEs $dev ;;
+    reset)  aclreset $dev ;;
+    user*)  aclset ${ACTION##*=} "$dev" ;;
+  esac
+done
+
+
