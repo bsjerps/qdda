@@ -54,6 +54,10 @@ make install
 Run `qdda -h` for command line options, `qdda -H` for more extensive help.
 Further documentation on the wiki page: http://outrun.nl/wiki/qdda
 
+## Example
+
+![example1](https://github.com/outrunnl/qdda/blob/master/pics/example1.gif)
+
 ## Future
 - Validate various compression methods (starting with VMAX all-flash)
 
