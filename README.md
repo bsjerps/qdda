@@ -98,6 +98,7 @@ net capacity        =      831.61 MiB
 ```
 
 raw capacity = total scanned disk space
+
 net capacity = required space on an XtremIO X2
 
 ## Future
