@@ -58,6 +58,8 @@ Further documentation on the wiki page: http://outrun.nl/wiki/qdda
 
 ![example1](https://github.com/outrunnl/qdda/blob/master/pics/example1.gif)
 
+<a href=https://github.com/outrunnl/qdda/blob/master/pics/example1.gif>Anim</a>
+
 ## Future
 - Validate various compression methods (starting with VMAX all-flash)
 
