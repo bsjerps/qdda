@@ -66,7 +66,7 @@ The database is running while we scan.
 ### Example output (Oracle ASM)
 
 ```
-[root@outrun01 ~](-) # qdda
+[root@outrun01 ~](-) # qdda /dev/oracleasm/*
 qdda 1.9.2 - The Quick & Dirty Dedupe Analyzer
 Use for educational purposes only - actual array reduction results may vary
 
