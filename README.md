@@ -1,6 +1,7 @@
 QDDA - The Quick and Dirty Deduplication Analyzer
 ======================
 
+![logo](https://github.com/outrunnl/qdda/blob/master/pics/qdda.png)
 
 ## Description
 QDDA checks files, named pipes or block devices for duplicate blocks to estimate 
