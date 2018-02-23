@@ -13,8 +13,9 @@ compressed bytes counts in SQLite database format.
 
 Other features:
 
+- Does not scan just a sample - ALL data is scanned
+- Can be executed as non-root (for security reasons)
 - Can scan live environments (such as prod database servers)
-- Can read from named/unnamed pipes - which allows qdda to run as non-root user
 - Blocksize adjustable between 1K and 128K
 - Built-in IO throttle to avoid overloading production systems (default 200MB/s)
 - Can merge (combine) results from different nodes (i.e. distributed storage environments)
