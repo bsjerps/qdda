@@ -104,6 +104,7 @@ raw capacity = total scanned disk space
 net capacity = required space on an XtremIO X2
 
 ## Future
+- Multithreading support (almost done, huge speed boost)
 - Validate various compression methods (starting with VMAX all-flash)
 
 ## Licensing
