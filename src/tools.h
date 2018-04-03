@@ -16,7 +16,8 @@
 #include <iomanip>
 
 struct option;
-typedef std::string string;
+//typedef std::string string;
+using string = std::string;
 
 // Debugging, messaging
 void dumpvars_exp(const char* names, int, ...);
