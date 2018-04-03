@@ -14,7 +14,8 @@
 #include "contrib/sqlite3.h"
 
 
-#define string std::string
+//#define string std::string
+typedef std::string string;
 
 /*******************************************************************************
  * functions
@@ -54,7 +55,7 @@ public:
   ulong execl();
   ulong execl(ulong);
   ulong execl(ulong,ulong);
-  const string exectext();
+  const std::string exectext();
   void  report(const string& tabs);
 private:
   void  step();

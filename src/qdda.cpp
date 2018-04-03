@@ -486,7 +486,6 @@ int main(int argc, char** argv) {
   
   parameters.workers   = cpuCount(); // + 2;
   parameters.readers   = 32;
-  //parameters.buffers   = 0;
   parameters.bandwidth = DEFAULT_BANDWIDTH;
   parameters.tmpdir    = DEFAULT_TMP;
   parameters.array     = "x2";
@@ -497,7 +496,7 @@ int main(int argc, char** argv) {
   -c <method|l>     : Compression method for reporting (use -c l to list methods)
 */
 
-//ulong testp = 0;
+
   Parameters& p = parameters;
   opts.add(showversion,'V',"version"  , ""           , "show version and copyright info");
   opts.add(p.do_help,  'h',"help"     , ""           , "show usage");
@@ -523,7 +522,6 @@ int main(int argc, char** argv) {
   opts.add(p.append,    0 ,"append"   , ""           , "Append data instead of deleting database");
   opts.add(p.detail,   'x',"detail"   , ""           , "Detailed report (file info and dedupe/compression histograms)");
 
-  
   rc=opts.parse(argc,argv);
   if(rc) die ("Invalid option");
 

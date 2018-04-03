@@ -28,6 +28,7 @@ using namespace std;
 const ulong blockspercycle = 64; // read x blocks at a time
 
 extern bool g_debug;
+extern bool g_quiet;
 //extern ofstream c_verbose;
 //extern ofstream c_debug;
 
@@ -238,7 +239,7 @@ void analyze(Filelist& filelist, QddaDB& db, Parameters& parameters) {
 
   SharedData sd(buffers, filelist.size(), blocksize, &stagingdb, parameters.bandwidth);
 
-  if(g_debug) cerr << "Scanning " << filelist.size() << " files, " 
+  if(!g_quiet) cout << "Scanning " << filelist.size() << " files, " 
             << readers << " readers, " 
             << workers << " workers, "
             << buffers << " buffers, "

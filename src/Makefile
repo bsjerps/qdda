@@ -9,13 +9,9 @@
 prefix     = /usr/local
 sysconfdir = /etc
 
-# CFLAGS  += -Wno-unused-but-set-variable
-# CFLAGS    += -Wall -fmax-errors=5
-# CFLAGS    += -Wno-missing-braces 
 CXXFLAGS  += -std=c++0x
 CFLAGS    += -O3
 LIBS       = -lpthread -lstdc++ -ldl
-
 STATIC     = /usr/lib64/liblz4.a
 
 all: qdda
