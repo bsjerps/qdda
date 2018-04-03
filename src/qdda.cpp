@@ -475,7 +475,7 @@ void mandump(LongOptions& lo) {
 
 int main(int argc, char** argv) {
   int rc = 0;
-  experiment();
+  // experiment();
   //menustuff(); exit(0);
   
   MenuOpt    action = MenuOpt::none;
