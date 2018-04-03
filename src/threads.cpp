@@ -25,7 +25,7 @@
 
 using namespace std;
 
-const ulong blockspercycle = 64; // read x blocks at a time
+const ulong blockspercycle = 128; // read x blocks at a time
 
 extern bool g_debug;
 extern bool g_quiet;

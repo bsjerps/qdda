@@ -65,8 +65,8 @@ int   cpuCount();       // return number of cpus (cores)
 ulong epoch();          // secs since 1970
 const char* hostName(); // system hostname
 const char* whoAmI();   // path to self
-const string& homeDir(); 
-
+const string& homeDir();
+long fileSystemFree(const char* path);
 
 // stopwatch class in microseconds - keep track of processing time
 class Stopwatch {

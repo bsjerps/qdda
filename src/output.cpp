@@ -111,7 +111,7 @@ void report(QddaDB& db) {
 
   cout
   << endl << "Database info (" << db.filename() << "):"
-  << endl << formatName("database size")       << setprecision(2) << fsize << " MiB"
+  << endl << formatName("database size")       << setprecision(2) << fixed << fsize << " MiB"
   << endl << formatName("array id")            << arrayid
   << endl << formatName("blocksize")           << toString(blocksize) + " KiB"
   << endl

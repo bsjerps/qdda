@@ -18,6 +18,7 @@
 #include <unistd.h>
 #include <limits.h>
 #include <sys/types.h>
+#include <sys/statvfs.h>
 #include <pwd.h>
 #include <getopt.h>
 
@@ -117,6 +118,13 @@ const std::string& homeDir() {
   else if(strlen(envhome)>3) homedir = envhome;
   else homedir = pwdhome;
   return homedir;
+}
+
+// get filesystem free in bytes
+long fileSystemFree(const char* path) {
+  struct statvfs stat;
+  if (statvfs(path, &stat) != 0) return -1;
+  return stat.f_bsize * stat.f_bavail;
 }
 
 // Stringarray functions
