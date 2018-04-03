@@ -134,7 +134,6 @@ const char * title_info =
 	" - The Quick & Dirty Dedupe Analyzer\n"
 	"Use for educational purposes only - actual array reduction results may vary\n";
 
-//extern const char* qdda_help;
 extern const char* qdda_longhelp;
 extern const char* manpage_head;
 extern const char* manpage_body;
@@ -173,22 +172,22 @@ ulong hash_md5(const char * src, char* zerobuf, const int size) {
   MD5_Init(&ctx);
   MD5_Update(&ctx, src, size);
   MD5_Final(digest, &ctx);
-  return                            // ignore chars 0-9
-    ((ulong)(digest[8]&0X0F)  << 56) +
-    ((ulong)digest[9]  << 48) +     // enable this for 56-bit hashes vs 48-bit
-    ((ulong)digest[10] << 40) +     // convert char* to ulong but keeping
-    ((ulong)digest[11] << 32) +     // the right order, only use lower 6 bytes (char 10-15)
-    ((ulong)digest[12] << 24) +     // SQLite integer is 8 byte signed so we need to stay within
-    ((ulong)digest[13] << 16) +     // 8 bytes and unsigned. 6 bytes is best compromise
+  return                                // ignore chars 0-8
+    ((ulong)(digest[8]&0X0F)  << 56) +  // pick 4 bits from byte 7, 8 bits from 0-6 (total 60)
+    ((ulong)digest[9]  << 48) +         // enable this for 56-bit hashes vs 48-bit
+    ((ulong)digest[10] << 40) +         // convert char* to ulong but keeping
+    ((ulong)digest[11] << 32) +         // the right order, only use lower 6 bytes (char 10-15)
+    ((ulong)digest[12] << 24) +         // SQLite integer is 8 byte signed so we need to stay within
+    ((ulong)digest[13] << 16) +         // 8 bytes and unsigned. 6 bytes is best compromise
     ((ulong)digest[14] << 8 ) +
     ((ulong)digest[15]);
 }
 
 // Get compressed bytes for a compressed block - lz4
 u_int compress(const char * src, char* buf, const int size) {
-  // memset(buf,0,MAX_BLKSIZE+1024);
+  // memset(buf,0,MAX_BLKSIZE+1024);                       // no longer needed?
   int result = LZ4_compress_default(src, buf, size, size); // call LZ4 compression lib, only use bytecount & ignore data
-  if(result>size) return size;                                  // don't compress if size is larger than blocksize
+  if(result>size) return size;                             // don't compress if size is larger than blocksize
   if(result==0) return size;
   return result;
 }
@@ -418,12 +417,6 @@ void perftest(QddaDB& db, Parameters& args, const string& p) {
   }
 }
 
-
-void mandump() {
-  //options.printman(cout);
-  exit(0);
-}
-
 void manpage() {
   string cmd;
   //cmd = "( qddaman=$(mktemp) ; ";
@@ -438,15 +431,6 @@ const string& defaultDbName() {
   static string dbname;
   dbname = homeDir() + "/qdda.db";
   return dbname;
-}
-
-void foobar(Parameters&, const char * p) {
-  cout << "Foobar!!!" << endl;
-  exit(0);
-}
-void foobar2() {
-  cout << "Foobar!!!" << endl;
-  exit(0);
 }
 
 int experiment() {
@@ -476,7 +460,6 @@ void mandump(LongOptions& lo) {
 int main(int argc, char** argv) {
   int rc = 0;
   // experiment();
-  //menustuff(); exit(0);
   
   MenuOpt    action = MenuOpt::none;
   string     dbname    = defaultDbName(); // DEFAULT_DBNAME;
