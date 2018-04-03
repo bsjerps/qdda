@@ -15,7 +15,7 @@
 
 
 //#define string std::string
-typedef std::string string;
+// typedef std::string string;
 
 /*******************************************************************************
  * functions
