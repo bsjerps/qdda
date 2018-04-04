@@ -246,9 +246,9 @@ void LongOptions::printman(std::ostream& os) {
     if(opts[i].val<255) shortp = string("-") + string(1, opts[i].val) + ", ";
     longp = string("--") + opts[i].name + " " + opts[i].optname;
     os << ".TP\n.B \\" << shortp << longp
-       << "\n" << opts[i].desc
-       << ".P\n";
+       << "\n" << opts[i].desc << "\n";
   }
+  os << ".P\n";
 }
 
 const option* LongOptions::long_opts() {
@@ -299,4 +299,8 @@ void setabort(int sig_num) {
 
 void armTrap() {
   signal(SIGINT, setabort);
+}
+
+void resetTrap() {
+  signal(SIGINT, SIG_DFL);
 }

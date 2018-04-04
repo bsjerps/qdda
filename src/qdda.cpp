@@ -306,8 +306,8 @@ void merge(QddaDB& db, Parameters& parameters) {
 // test merging performance with random data, format rows:w0:w1:w2:...
 // sizegb:zeroval:dup1:dup2:...
 // totalsize,zero=xx,dup1=xx
-void mergetest(QddaDB& db, Parameters& parameters, const string& p) {
-  string tmpname = parameters.tmpdir + "/qdda-staging.db";
+void dbtest(QddaDB& db, Parameters& p) {
+  string tmpname = p.tmpdir + "/qdda-staging.db";
   StagingDB::createdb(tmpname,db.getblocksize());
   StagingDB stagingdb(tmpname);
 
@@ -316,7 +316,7 @@ void mergetest(QddaDB& db, Parameters& parameters, const string& p) {
   
   ulong        rows = 0;  
   string       str;
-  stringstream ss(p);
+  stringstream ss(p.dbtestopts);
   
   while(ss.good()) {
     getline(ss,str,',');
@@ -351,7 +351,7 @@ void mergetest(QddaDB& db, Parameters& parameters, const string& p) {
 }
 
 // test hashing, compression and insert performance
-void speedtest(QddaDB& db) {
+void cputest(QddaDB& db) {
   
   const char* tmpname = "/var/tmp/staging-test.db";
   StagingDB::createdb(tmpname,db.getblocksize());
@@ -406,6 +406,7 @@ void speedtest(QddaDB& db) {
   Database::deletedb(tmpname);
 }
 
+/*
 // parse arg and call either speedtest (arg=0) or mergetest
 void perftest(QddaDB& db, Parameters& args, const string& p) {
   if(p != "0") {
@@ -413,7 +414,7 @@ void perftest(QddaDB& db, Parameters& args, const string& p) {
   } else {
     speedtest(db);
   }
-}
+}*/
 
 void manpage() {
   string cmd;
@@ -449,9 +450,6 @@ void mandump(LongOptions& lo) {
 int main(int argc, char** argv) {
   int rc = 0;
 
-  armTrap();
-
-
   string     dbname    = defaultDbName(); // DEFAULT_DBNAME;
   Parameters parameters = {};
   LongOptions opts;
@@ -463,7 +461,6 @@ int main(int argc, char** argv) {
   parameters.tmpdir    = DEFAULT_TMP;
   parameters.array     = "x2";
   
-  
 //  -B <blksize_kb>   : Set blocksize to blksize_kb kilobytes
 // --create ?
 
@@ -471,26 +468,27 @@ int main(int argc, char** argv) {
 
   opts.add("version"  ,'V', ""           , showversion,  "show version and copyright info");
   opts.add("help"     ,'h', ""           , p.do_help,    "show usage");
+  opts.add("man"      ,'m', ""           , manpage,      "show detailed manpage");
   opts.add("db"       ,'d', "<file>"     , dbname,       "database file path (default $HOME/qdda.db)");
   opts.add("quiet"    ,'q', ""           , g_quiet,      "Don't show progress indicator or intermediate results");
   opts.add("bandwidth",'b', "<mb/s>"     , p.bandwidth,  "Throttle bandwidth in MB/s (default 200, 0=disable)");
   opts.add("mandump"  , 0 , ""           , p.do_mandump, "dump manpage to stdout");
-  opts.add("man"      , 0 , ""           , manpage,      "show manpage");
+
   opts.add("workers"  , 0 , "<wthreads>" , p.workers,    "number of worker threads");
   opts.add("readers"  , 0 , "<rthreads>" , p.readers,    "(max) number of reader threads");
   opts.add("buffers"  , 0 , "<buffers>"  , p.buffers,    "number of buffers (debug only!)");
   opts.add("dryrun"   ,'n', ""           , p.dryrun,     "skip staging db updates during scan");
-  opts.add("array"    , 0 , "<arrayid>"  , p.array,      "set array type/id");
+  opts.add("array"    , 0 , "<arrayid>"  , p.array,      "set array type/id"); // need list option
   opts.add("purge"    , 0 , ""           , p.do_purge,   "Reclaim unused space in database (sqlite vacuum)");
   opts.add("import"   , 0 , "<file>"     , p.import,     "import another database (must have compatible metadata)");
   opts.add("cputest"  , 0 , ""           , p.do_cputest, "Single thread CPU performance test");
-  opts.add("dbtest"   , 0 , "<testdata>" , p.do_dbtest,  "Database performance test");
+  opts.add("dbtest"   , 0 , "<testpars>" , p.dbtestopts, "Database performance test");
   opts.add("nomerge"  , 0 , ""           , p.skip,       "Skip staging data merge and reporting, keep staging database");
   opts.add("debug"    , 0 , ""           , g_debug,      "Enable debug output");
   opts.add("queries"  , 0 , ""           , g_query,      "Show SQLite queries and results"); // --show?
   opts.add("tempdir"  , 0 , "<dir>"      , p.tmpdir,     "Set SQLite TEMPDIR (default /var/tmp");
   opts.add("delete"   , 0 , ""           , p.do_delete,  "Delete database");
-  opts.add("append"   , 0 , ""           , p.append,     "Append data instead of deleting database");
+  opts.add("append"   ,'a', ""           , p.append,     "Append data instead of deleting database");
   opts.add("detail"   ,'x', ""           , p.detail,     "Detailed report (file info and dedupe/compression histograms)");
 
   rc=opts.parse(argc,argv);
@@ -500,7 +498,10 @@ int main(int argc, char** argv) {
   else if(p.do_mandump) { mandump(opts); exit(0); }
   
   showtitle();
-  if(p.do_delete)  { Database::deletedb(dbname); exit(0); }
+  if(p.do_delete)  {
+    cout << "Deleting database " << dbname << endl;
+    Database::deletedb(dbname); exit(0);
+  }
   
   // Build filelist
   if(optind<argc || !isatty(fileno(stdin)) ) {
@@ -509,11 +510,13 @@ int main(int argc, char** argv) {
     for (int i = optind; i < argc; ++i)
       filelist.open(argv[i]);
     if(!parameters.append) { // not appending -> delete old database
+      cout << "Creating new database " << dbname << endl;
       Database::deletedb(dbname);
       QddaDB::createdb(dbname);
     }
   }
-  if((p.do_dbtest || p.do_cputest) && !p.append) {
+  if((p.dbtestopts.size() || p.do_cputest) && !p.append) {
+    cout << "Creating new database " << dbname << endl;
     Database::deletedb(dbname);
     QddaDB::createdb(dbname);
   }    
@@ -521,10 +524,12 @@ int main(int argc, char** argv) {
   db.parsemetadata(parameters.array);
   if(filelist.size()>0) 
     analyze(filelist, db, parameters);
+  if(g_abort) return 1;
+
   if(p.do_purge)             { db.vacuum(); exit(0); }
   else if(!p.import.empty()) { import(db,p.import); exit(0); } // import(db,p)
-  else if(p.do_cputest)      { cout << "cputest\n"; exit(0); }
-  else if(p.do_dbtest)       { cout << "dbtest\n"; exit(0); } //mergetest(db,args,p);
+  else if(p.do_cputest)      { cputest(db) ; exit(0); } 
+  else if(p.dbtestopts.size()) { dbtest(db, p); exit(0); }
   if(!parameters.skip)       { merge(db,parameters); } // merge staging data if any
   if(parameters.detail)      { reportHistograms(db); }
   else if (!p.skip)          { report(db); }

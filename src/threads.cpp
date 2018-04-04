@@ -229,6 +229,7 @@ void worker(int thread, SharedData& sd, Parameters& parameters) {
  */
  
 void analyze(Filelist& filelist, QddaDB& db, Parameters& parameters) {
+  armTrap();
   if(g_debug) cout << "Main thread pid " << getpid() << endl;
   string tmpname = parameters.tmpdir + "/qdda-staging.db";
   Database::deletedb(tmpname);
@@ -278,5 +279,6 @@ void analyze(Filelist& filelist, QddaDB& db, Parameters& parameters) {
     stagingdb.close();
     Database::deletedb(tmpname);
   }
+  resetTrap();
 }
 

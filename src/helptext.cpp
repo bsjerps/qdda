@@ -17,18 +17,21 @@ qdda \- the quick & dirty dedupe analyzer
 .B qdda
 checks files, data streams or block devices for duplicate blocks to estimate deduplication
 efficiency on dedupe capable storage systems, using key-value stores in SQLite,
-MD5 hashing and LZ4 compression.  It also estimates compression ratios for
+MD5 hashing and LZ4 compression.  It also estimates compression ratios for all-flash arrays
 XtremIO X1 and X2 as well as VMAX AFA (experimental).
 .P
-qdda is safe to run even on files/devices that are in use. It opens streams read-only and cannot modify any files.
-It writes to a database file that needs to be either newly created or a pre-existing SQLite3 database.
-It can remove the database file but ONLY if it is an SQLite3 file.
 
-.SH IMPORTANT NOTE
+.SH IMPORTANT NOTES
 .B qdda
 can create very large database files and generate lots of read I/O and heavy CPU load. Check the 
 .B RESOURCE REQUIREMENTS
 section before you start.
+.P
+For additional safety, run
+.B qdda
+as non-root user. See the 
+.B SECURITY AND SAFETY
+section for details on how to do this.
 .P
 .SH OPTIONS
 )";
@@ -108,7 +111,7 @@ using block sizes larger than 64K).
 .br
 For each row, SQLite keeps additional information (the rowid) which requires another 8 bytes. So the amount of bytes per block is
 roughly 8 + 8 + 2 = 18 bytes. Scanning a terabyte disk at 16K blocksize requires 67,108,864 rows. The database capacity required for
-the staging table is then 67108864 * 18 = 1,207,959,552 bytes = 1152 MiB.
+the staging table is then 67108864 * 18 = 1,207,959,552 bytes = 1152 MiB (not including a little bit extra capacity for SQLite internals).
 .br
 So at 16K blocksize the database capacity for scanning is roughly 0.11% of the data size.
 .P
@@ -235,15 +238,24 @@ currently ignores these effects and produces results for all data as if it was c
 .SH CONFIG FILES
 None.
 .SH ENVIRONMENT VARIABLES
-.TP
-SQLITE_TMPDIR - if set, is used for the temporary tables such as used for sorting and joining
+.IP SQLITE_TMPDIR
 .br
-TMPDIR - if SQLITE_TMPDIR is not set, TMPDIR is used for temp tables
+if set, is used for the temporary tables such as used for sorting and joining
+.br
+.IP TMPDIR
+.br
+if SQLITE_TMPDIR is not set, TMPDIR is used for temp tables
 .SH BEHAVIOUR
 .SH SECURITY AND SAFETY
 For added safety you may run qdda as a non-privileged user. Non-root users usually do not have access to block devices.
 To run QDDA in a safe way, there are various methods (assuming the "qdda" user without root privileges) you need to provide read
-access to the disk devices you need to scan. 
+access to the disk devices you need to scan.
+.P
+.B qdda
+is safe to run even on files/devices that are in use. It opens streams read-only and cannot modify any files except 
+SQLite3 database files.
+It writes to a database file that needs to be either newly created or a pre-existing SQLite3 database.
+It can remove the database file but ONLY if it is an SQLite3 file.
 .br
 Changing the group/permissions on /dev/<disk> is problematic as it either gives all users read access (chmod 664) or alters permissions
 for other applications such as Oracle ASM. 
@@ -273,6 +285,7 @@ source host: (as root) cat /dev/<disk> | nc targethost 19000
 .SH FILES
 .SH KNOWN ISSUES
 .SH SEE ALSO
+lz4(1), dgst(1), sqlite3(1)
 .SH AUTHOR
 Compiled by Bart Sjerps - contact me via my blog "Dirty Cache" - \fIhttp://bartsjerps.wordpress.com\fR
 .br
@@ -391,81 +404,3 @@ after which hash collisions may cause increasingly inaccurate results.
 More info: http://outrun.nl/wiki/qdda
 )";
 
-const char* dummyduff = R"(
-
-.TP
-.B \-D (debug)
-.\(em -D (debug)
-Show lots of annoying debug info
-.TP
-.B \-Q (query)
-Show most of the SQLite3 queries
-.TP
-.B \-B <blksize_kb>
-Set blocksize to blksize_kb kilobytes
-.TP
-.B \-P (purge)      
-Reclaim unused space in database (sqlite vacuum)
-.TP
-.B \-T <tempdir>      
-Use tempdir instead of /var/tmp for SQLite temp files
-.TP
-.B \-a (append)       
-Append data to existing database
-.TP
-.B \-b <bandw>        
-Throttle bandwidth in MB/s (default 200, set to 0 to disable throttling)
-.TP
-.B \-c <method|l>     
-Compression method for reporting (use -c l to list methods)
-.TP
-.B \-d (dump)         
-Dump block offsets and hashes (to search for block offset with hash)
-.TP
-.B \-f <database>   
-Specify alternative database location (default /var/tmp/qdda.db)
-.TP
-.B \-i <import-db>    
-Import data from another database (merge with existing data)
-.TP
-.B \-n (noupdate)     
-Dryrun - just read data (no update to database)
-.TP
-.B \-q (quiet)        
-Don't show progress indicator or intermediate results
-.TP
-.B \-r (no-Report)    
-Don't show report, don't merge staging data and keep staging database
-.TP
-.B \-t [size_gb|0]    
-Run raw performance test (size_gb 0) or merge test (data size in GB)
-.TP
-.B \-V (version)      
-print version and copyright info
-.TP
-.B \-w (workers)      
-Set number of worker threads (default 1)
-.TP
-.B \-x (eXtended)     
-Extended report (file info and dedupe/compression histograms)
-.TP
-.B \-h or ? (help)    
-This help
-.TP
-.B \-H Long help      
-More detailed information, tips & tricks
-
-.P
-List example
-.IP
-\(em Item 1
-.br
-\(em Item 2
-.br
-\(em Item 3
-.P
-.B qdda
-stuff
-.P
-
-)";

@@ -89,7 +89,9 @@ const char* whoAmI();    // path to self
 const string& homeDir();
 long fileSystemFree(const char* filename); // filesystem free in MB for this file
 off_t fileSize(const char *filename);      // return size of file in bytes
-void armTrap();                            // interrupt handler
+
+void armTrap();   // interrupt handler, enable
+void resetTrap(); // disable
 
 /*******************************************************************************
  * Stopwatch - a timer class that keeps track of time in microseconds

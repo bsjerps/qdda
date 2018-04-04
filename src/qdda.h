@@ -13,6 +13,8 @@
 
 #pragma once
 
+#define string std::string
+
 /*******************************************************************************
  * functions
  ******************************************************************************/
@@ -42,19 +44,20 @@ public:
   int            size();
   ulong          getBytes(int i);
   ulong          getBlocks(int i);
-  const std::string& name(int i);
+  const string& name(int i);
   void           open(const char *);
 private:
   std::vector <std::ifstream *> ifs;
-  std::vector <std::string> filename;
+  std::vector <string> filename;
 };
 
 
 // Parameter set to pass between functions
 struct Parameters {
-  std::string tmpdir;
-  std::string array;
-  std::string import;
+  string tmpdir;
+  string array;
+  string import;
+  string dbtestopts;
   int  bandwidth; // default bandwidth throttle (MB/s)
   int  workers;   // number of workers (threads)
   int  readers;   // max number of readers
@@ -62,7 +65,7 @@ struct Parameters {
   bool do_help;
   bool do_mandump;
   bool do_cputest;
-  bool do_dbtest;
+  // bool do_dbtest;
   bool do_purge;
   bool do_delete;
   bool queries;
@@ -73,5 +76,6 @@ struct Parameters {
   bool detail;
 };
 
+#undef string
 
 
