@@ -14,6 +14,9 @@ CFLAGS    += -O3
 LIBS       = -lpthread -lstdc++ -ldl
 STATIC     = /usr/lib64/liblz4.a
 
+# disable for prod version
+CXXFLAGS  += -D__DEBUG
+
 all: qdda
 
 # Static linking of lz4 avoids having to install dependencies
@@ -57,13 +60,9 @@ allclean:
 
 install: qdda
 	install -d 0755 $(prefix)/bin
-	install -d 0755 $(prefix)/libexec
 	install -d 0755 $(sysconfdir)/bash_completion.d
-	install -d 0755 $(sysconfdir)/udev/rules.d
 	install -m 0755 qdda $(prefix)/bin
-	install -m 0755 support/qdda-acl $(prefix)/libexec
 	install -m 0644 support/qdda.bash $(sysconfdir)/bash_completion.d
-	install -m 0644 support/10-qdda.rules $(sysconfdir)/udev/rules.d
 
 .PHONY: install
 

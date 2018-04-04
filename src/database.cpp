@@ -29,15 +29,17 @@
 
 extern bool g_debug;
 extern bool g_query;
+extern bool g_abort;
 extern std::ofstream  c_debug;
 extern std::ofstream  c_query;
-// extern std::ofstream  c_verbose;
+extern const char* PROGVERSION;
 extern ulong          starttime;
 
 // std::shorthands
 
 // #define string std::string
 typedef std::string string;
+
 std::ostream& cout = std::cout;
 std::ostream& endl (std::ostream& os) { return std::endl(os) ; }
 
@@ -113,31 +115,53 @@ const char* Query::sql() { return sqlite3_sql(pStmt); }
 
 // prepare the statement
 int Query::prep(sqlite3 *db, const char * query) {
-  int rc=0;
-  ref = 0; // reset parameters
+  ref = 0; // reset parameter count
   if(!db) return 0;
   const char * pzTest;
-  rc=sqlite3_prepare_v2(db, query, strlen(query), &pStmt, &pzTest);
-  if(rc!=SQLITE_OK) die("SQL Prepare error " + toString(rc) + ", query: " + query);
-  return rc;
+  int rc=sqlite3_prepare_v2(db, query, strlen(query), &pStmt, &pzTest);
+  if(rc==SQLITE_OK) return 0;
+  cout << "MySQL prepare, return code: " << rc << endl;
+  die(sqlite3_errmsg(db));
+  return rc; // we never get here
 }
 
-int Query::bind(const ulong p)   { sqlite3_bind_int64(pStmt, ++ref, p); };
-int Query::bind(const char* p)   { sqlite3_bind_text (pStmt, ++ref, p, strlen(p),SQLITE_STATIC); };
-int Query::bind(const string& p) { bind(p.c_str()); };
+int Query::bind(const ulong p) { 
+  int rc = sqlite3_bind_int64(pStmt, ++ref, p);
+  if(rc==SQLITE_OK) return 0;
+  cout << "MySQL bind ulong, return code: " << rc << ", query = " << sql() << endl;
+  die(sqlite3_errmsg(sqlite3_db_handle(pStmt)));
+  return rc; // we never get here
+};
 
-void Query::step() {
+int Query::bind(const char* p) {
+  int rc = sqlite3_bind_text (pStmt, ++ref, p, strlen(p),SQLITE_STATIC);
+  if(rc==SQLITE_OK) return 0;
+  cout << "MySQL bind string, return code: " << rc << endl;
+  die(sqlite3_errmsg(sqlite3_db_handle(pStmt)));
+  return rc; // we never get here
+};
+
+int Query::bind(const string& p) { return bind(p.c_str()); };
+
+int Query::step() {
   if(!pStmt) die("Query statement not prepared");
   if(g_query) print(std::cout);
-  sqlite3_step(pStmt);
+  int rc = sqlite3_step(pStmt);
+  if(rc==SQLITE_DONE) return 0;
+  if(rc==SQLITE_ROW) return 0;
+  cout << "MySQL step, return code: " << rc << endl;
+  die(sqlite3_errmsg(sqlite3_db_handle(pStmt)));
+  return rc; // we never get here
 }
 
-void Query::reset() {
-  sqlite3_reset(pStmt);
+int Query::reset() {
   if(g_query) std::cout << std::endl << std::flush;
   ref=0;
+  int rc = sqlite3_reset(pStmt);
+  if(rc==SQLITE_OK) return 0;
+  cout << "MySQL reset, return code: " << rc << endl;
+  die(sqlite3_errmsg(sqlite3_db_handle(pStmt)));
 }
-
 
 //char *sqlite3_expanded_sql(sqlite3_stmt *pStmt);
 // simple exec of prepared statement, no return value
@@ -302,6 +326,11 @@ const char* Database::filename() {
   return sqlite3_db_filename(db, NULL);
 }
 
+ulong Database::filesize() {
+  if(!db) return 0;
+  return fileSize(sqlite3_db_filename(db, NULL));
+}
+
 int Database::exists(const char* fn) {
   int rc = 0;
   sqlite3* tempdb;
@@ -417,9 +446,6 @@ SELECT 0, 0 UNION ALL
 SELECT 0, 0 FROM rnd LIMIT ?1
 ) INSERT INTO STAGING SELECT NULL, K,B FROM rnd;
 )")
-  
-
-
 {
   sql("PRAGMA schema_version");      // trigger error if not open
   sql("PRAGMA journal_mode = off");
@@ -430,30 +456,9 @@ SELECT 0, 0 FROM rnd LIMIT ?1
   sql("PRAGMA locking_mode = EXCLUSIVE");
   */
   sql("PRAGMA mmap_size = 65536");
-  
-  // q_getblocksize.prep     (db,"select blksz from metadata");
-  //q_insert.prep           (db,"insert into staging(k,b) values (?,?)");
-  //q_meta.prep             (db,"insert into files (name,blocks,hostname,timestamp,bytes) values (?,?,?,?,?)");
-  
-  /*
-  q_fillrand.prep(db,R"(
-with recursive 
-rnd(k,b) AS (
-SELECT 1+ABS(RANDOM()%0xFFFFFFFFFFFFFF), 1+ABS(RANDOM())%?2 UNION ALL
-SELECT 1+ABS(RANDOM()%0xFFFFFFFFFFFFFF), 1+ABS(RANDOM())%?2 FROM rnd LIMIT ?1
-),
-c(x) AS (SELECT 0 UNION ALL SELECT X+1 FROM C LIMIT ?3)
-INSERT INTO STAGING SELECT NULL, K,B FROM rnd,c;
-)");*/
-/*
-  q_fillzero.prep(db,R"(
-with recursive 
-rnd(k,b) AS (
-SELECT 0, 0 UNION ALL
-SELECT 0, 0 FROM rnd LIMIT ?1
-) INSERT INTO STAGING SELECT NULL, K,B FROM rnd;
-)");
-*/
+}
+
+StagingDB::~StagingDB() {
 }
 
 void StagingDB::begin()  { q_begin.exec(); }
@@ -480,14 +485,6 @@ int StagingDB::fillrandom(ulong rows, int blocksize, int dup) {
   return 0;
 }
 
-// copy
-// with r(c,d) as (select count(*),10 from staging) 
-// select s1.id,s2.k,s2.b from staging s1,r join staging s2 on s1.id <= r.d and s2.id = s1.id + r.d ;
-//
-// multicopy
-// with recursive c(x) as (select 1 union all select x+1 from c limit 4),d(x,y) as (select c1.x c,c2.x id from c c1, c c2) select * from d;
-// with recursive m(r) as (select count(*) from staging),c(x) as (select 0 union all select x+1 from c limit 4), d(r,c,s,t) as (select r,c2.x c,1+c1.x s,r-(4*c1.x + c2.x) id from c c1, c c2,m) select * from d;
-
 int StagingDB::fillzero(ulong rows) {
   begin();
   q_fillzero.bind(rows);
@@ -502,7 +499,7 @@ int StagingDB::savemeta(string name, ulong blocks, ulong bytes) {
   q_meta.bind(hostName());
   q_meta.bind(starttime);
   q_meta.bind(bytes);
-  q_meta.execl();
+  q_meta.exec();
   return 0;
 }
 
@@ -510,54 +507,58 @@ int StagingDB::savemeta(string name, ulong blocks, ulong bytes) {
  * QDDA DB class functions
  ******************************************************************************/
 
-/*******************************************************************************
- * Load default bucket sizes into database for each compression method
- * Currently the methods are:
- * X1: Bucketsizes for XtremIO X1,   8K blocksize
- * X2: Bucketsizes for XtremIO X2,  16K blocksize
- * V1: VMAX All Flash (beta),      128K blocksize
- * Other methods can be loaded manually into the database after creating the DB
- ******************************************************************************/
-
-extern const char* PROGVERSION;
-
-void QddaDB::setmetadata(string pr) {
-  if(getblocksize()) return;
-  string buckets;
-  string name;
-  ulong blocksize = 0;
-
-  if(pr == "")      { blocksize =  16; name = "XtremIO X2"; buckets = "1,2,3,4,5,6,7,8,9,10,11,12,13,15,16"; }
-  if(pr == "x1")    { blocksize =   8; name = "XtremIO X1"; buckets = "2,4,8"; }
-  if(pr == "x2")    { blocksize =  16; name = "XtremIO X2"; buckets = "1,2,3,4,5,6,7,8,9,10,11,12,13,15,16"; }
-  if(pr == "vmax1") { blocksize = 128; name = "VMAX v1"   ; buckets = "8,16,24,32.40,48,56,64,72,80,88,96,104,112,120,128"; }
-
-  if(pr.substr(0,5) == "name=") {
-    string str;
-    std::stringstream ss(pr);
-    while(ss.good()) {
-      getline(ss,str,':');
-      if(str.substr(0,5) == "name=")    name=str.substr(5);
-      if(str.substr(0,3) == "bs=")      blocksize=atoll(str.substr(3).c_str());
-      if(str.substr(0,8) == "buckets=") buckets=str.substr(8);
-    }
-  }
+QddaDB::QddaDB(const string& fn): Database(fn),
+  q_getblocksize         (db,"select blksz from metadata"),
+  q_getrows              (db,"select count(*) from kv"),
+  q_getallocated         (db,"select sum(blocks) from v_compressed"),
+  q_getarrayid           (db,"select arrayid from metadata"),
+  q_getzero              (db,"select blocks from kv where hash=0"),
+  q_gettotal             (db,"select sum(blocks) from kv"),
+  q_getused              (db,"select sum(ref*count) from m_sums_deduped"),
+  q_getnuniq             (db,"select sum(ref*count) from m_sums_deduped where ref>1"),
+  q_getunique            (db,"select count from m_sums_deduped where ref=1"),
+  q_getdeduped           (db,"select sum(count) from m_sums_deduped"),
+  q_getbytescompressedraw(db,"select sum(raw) from m_sums_compressed"),
+  q_getbytescompressednet(db,"select sum(bytes) from m_sums_compressed"),
+  q_loadbuckets          (db,"insert or replace into buckets values (?)"),
+  q_truncbuckets         (db,"delete from buckets"),
+  q_listfiles            (db,"select * from v_files"),
+  q_attach               (db,"attach database ? as ?"),
+  q_detach               (db,"detach database ?"),
+  q_trunc_sums_compr     (db,"delete from m_sums_compressed"),
+  q_trunc_sums_deduped   (db,"delete from m_sums_deduped"),
+  q_update_sums_compr    (db,"insert into m_sums_compressed select * from v_sums_compressed"),
+  q_update_sums_deduped  (db,"insert into m_sums_deduped select * from v_sums_deduped"),
   
-  if(!blocksize) die("Unknown profile");
-  if(blocksize>131072) die("Blocksize too large");
-  Query q_meta(db,"insert into metadata (version, blksz, compression, arrayid, created) values (?,?,?,?,?)");
-  q_meta.bind(PROGVERSION);
-  q_meta.bind(blocksize);
-  q_meta.bind("lz4");
-  q_meta.bind(name);
-  q_meta.bind(epoch());
-  q_meta.exec();
-  loadbuckets(buckets);
+  q_hist_compress(db,"select * from v_compressed union all "
+                     "select 'Total:',sum(sum),sum(bucket_kb),sum(blocks),sum(mb) from v_compressed"),
+  q_hist_dedupe(db,"select * from v_deduped union all \n"
+                   "select 'Total:',sum(count),sum(bytes),sum(MiB) from v_deduped")
+{
+  sql("PRAGMA schema_version");      // trigger error if not open
+  sql("PRAGMA temp_store_directory = '" + tmpdir + "'");
+  // sql("PRAGMA temp_store = 2"); // use memory for temp tables
 }
+
+// wrapper functions for prefab queries
+ulong QddaDB::getblocksize()                      { return q_getblocksize.execl();  }  // blocksize from database
+ulong QddaDB::getrows()                           { return q_getrows.execl(); }        // rows in kv table
+ulong QddaDB::getallocated()                      { return q_getallocated.execl(); }  // blocks required after compress
+ulong QddaDB::getzero()                           { return q_getzero.execl(); };
+ulong QddaDB::gettotal()                          { return q_gettotal.execl(); };
+ulong QddaDB::getunique()                         { return q_getunique.execl(); };
+ulong QddaDB::getnuniq()                          { return q_getnuniq.execl(); };
+ulong QddaDB::getdeduped()                        { return q_getdeduped.execl(); };
+ulong QddaDB::getbytescompressedraw()             { return q_getbytescompressedraw.execl(); };
+ulong QddaDB::getbytescompressednet()             { return q_getbytescompressednet.execl(); };
+ulong QddaDB::getused()                           { return q_getused.execl(); };
+void  QddaDB::report_files(const string& tabs)    { q_listfiles.report(tabs); };
+void  QddaDB::report_dedupe(const string& tabs)   { q_hist_dedupe.report(tabs); };
+void  QddaDB::report_compress(const string& tabs) { q_hist_compress.report(tabs); };
+const string QddaDB::getarrayid() { return q_getarrayid.exectext(); }
 
 void QddaDB::createdb(const string& fn) {
   Database::createdb(fn,R"(
-
 CREATE TABLE IF NOT EXISTS metadata(lock char(1) not null default 1
 , version text
 , blksz integer
@@ -618,7 +619,8 @@ select ref
 from m_sums_deduped
 -- union all select 0,blocks, 0, 0 from kv where hash=0;
 )");
-/*
+
+/* test stuff
 INSERT INTO BUCKETS VALUES (2),(4),(8);
 INSERT INTO KV VALUES (1,2,3);
 INSERT INTO KV VALUES (4,5,3000);
@@ -627,39 +629,45 @@ INSERT INTO KV VALUES (5,5,5000);
 
 }
 
-QddaDB::QddaDB(const string& fn): Database(fn),
-  q_getblocksize         (db,"select blksz from metadata"),
-  q_getrows              (db,"select count(*) from kv"),
-  q_getallocated         (db,"select sum(blocks) from v_compressed"),
-  q_getarrayid           (db,"select arrayid from metadata"),
-  q_getzero              (db,"select blocks from kv where hash=0"),
-  q_gettotal             (db,"select sum(blocks) from kv"),
-  q_getused              (db,"select sum(ref*count) from m_sums_deduped"),
-  q_getnuniq             (db,"select sum(ref*count) from m_sums_deduped where ref>1"),
-  q_getunique            (db,"select count from m_sums_deduped where ref=1"),
-  q_getdeduped           (db,"select sum(count) from m_sums_deduped"),
-  q_getbytescompressedraw(db,"select sum(raw) from m_sums_compressed"),
-  q_getbytescompressednet(db,"select sum(bytes) from m_sums_compressed"),
-  q_loadbuckets          (db,"insert into buckets values (?)"),
-  q_truncbuckets         (db,"delete from buckets"),
-  q_listfiles            (db,"select * from v_files"),
-  q_attach               (db,"attach database ? as ?"),
-  q_detach               (db,"detach database ?"),
-  q_trunc_sums_compr     (db,"delete from m_sums_compressed"),
-  q_trunc_sums_deduped   (db,"delete from m_sums_deduped"),
-  q_update_sums_compr    (db,"insert into m_sums_compressed select * from v_sums_compressed"),
-  q_update_sums_deduped  (db,"insert into m_sums_deduped select * from v_sums_deduped"),
-  
-  q_hist_compress(db,"select * from v_compressed union all "
-                     "select 'Total:',sum(sum),sum(bucket_kb),sum(blocks),sum(mb) from v_compressed"),
-  q_hist_dedupe(db,"select * from v_deduped union all \n"
-                   //"select 'free', blocks, 0, 0 from kv where hash=0 union all \n"
-                   "select 'Total:',sum(count),sum(bytes),sum(MiB) from v_deduped")
+/*******************************************************************************
+ * Default metadata settings for each compression method
+ * Currently the methods are:
+ * X1: Bucketsizes for XtremIO X1,   8K blocksize
+ * X2: Bucketsizes for XtremIO X2,  16K blocksize
+ * V1: VMAX All Flash (beta),      128K blocksize
+ * Other methods can be loaded manually into the database after creating the DB
+ ******************************************************************************/
 
-{
-  sql("PRAGMA schema_version");      // trigger error if not open
-  sql("PRAGMA temp_store_directory = '" + tmpdir + "'");
-  // sql("PRAGMA temp_store = 2"); // use memory for temp tables
+void QddaDB::setmetadata(int blocksize, const string& compr, const string& name, const string& buckets) {
+  if(blocksize>128) die("Blocksize too large");
+  Query q_meta(db,"insert into metadata (version, blksz, compression, arrayid, created) values (?,?,?,?,?)");
+  q_meta.bind(PROGVERSION);  
+  q_meta.bind(blocksize);
+  q_meta.bind(compr);
+  q_meta.bind(name);
+  q_meta.bind(epoch());
+  q_meta.exec();
+  loadbuckets(buckets);
+}
+
+void QddaDB::parsemetadata(string pr) {
+  if(getblocksize()) return;
+  if     (pr == "x1")    setmetadata(  8, "lz4", "XtremIO X1", "2+4+8");
+  else if(pr == "x2")    setmetadata( 16, "lz4", "XtremIO X2", "1+2+3+4+5+6+7+8+9+10+11+12+13+15+16");
+  else if(pr == "vmax1") setmetadata(128, "lz4", "VMAX v1",    "8+16+24+32.40+48+56+64+72+80+88+96+104+112+120+128");
+  else {
+    string buckets, str;
+    string name = "custom";
+    int    blocksize = 16;
+    std::stringstream ss(pr);
+    while(ss.good()) {
+      getline(ss,str,',');
+      if(str.substr(0,5) == "name=")    name=str.substr(5);
+      if(str.substr(0,3) == "bs=")      blocksize=atoll(str.substr(3).c_str());
+      if(str.substr(0,8) == "buckets=") buckets=str.substr(8);
+    }
+    setmetadata(blocksize, "lz4", name, buckets);
+  }
 }
 
 void QddaDB::loadbuckets(const string& s) {
@@ -669,12 +677,13 @@ void QddaDB::loadbuckets(const string& s) {
   std::stringstream ss(s);
   string str;
   while(ss.good()) {
-    getline(ss,str,',');
+    getline(ss,str,'+');
     q_loadbuckets.bind(atoll(str.c_str()));
     q_loadbuckets.execl();
   }
+  q_loadbuckets.bind(getblocksize());
+  q_loadbuckets.execl();
 }
-
 
 /*
 for reference, classic merge:
@@ -708,7 +717,6 @@ void QddaDB::import(const string& fn) {
   q_attach.bind(fn);
   q_attach.bind("impdb");
   q_attach.exec();
-
   Query q_import(db,"insert or replace into main.kv \n"
                     "select impdb.kv.hash \n"
                     ", coalesce(main.kv.blocks,0) + impdb.kv.blocks\n"
@@ -717,34 +725,11 @@ void QddaDB::import(const string& fn) {
                     "group by impdb.kv.hash\n"
                     "order by main.kv.hash,impdb.kv.hash\n");
   q_import.exec();
-
   q_trunc_sums_compr.exec();
   q_trunc_sums_deduped.exec();
   q_update_sums_compr.exec();
   q_update_sums_deduped.exec();
-
   sql("insert into files(name, hostname, timestamp, blocks, bytes) "
       "select name, hostname, timestamp, blocks, bytes from impdb.files");
 }
-
-/*******************************************************************************
- * Prefab queries
- ******************************************************************************/
-
-ulong QddaDB::getblocksize()                     { return q_getblocksize.execl();  }  // blocksize from database
-ulong QddaDB::getrows()                          { return q_getrows.execl(); }        // rows in kv table
-ulong QddaDB::getallocated()                     { return q_getallocated.execl(); }  // blocks required after compress
-ulong QddaDB::getzero()                          { return q_getzero.execl(); };
-ulong QddaDB::gettotal()                         { return q_gettotal.execl(); };
-ulong QddaDB::getunique()                        { return q_getunique.execl(); };
-ulong QddaDB::getnuniq()                         { return q_getnuniq.execl(); };
-ulong QddaDB::getdeduped()                       { return q_getdeduped.execl(); };
-ulong QddaDB::getbytescompressedraw()            { return q_getbytescompressedraw.execl(); };
-ulong QddaDB::getbytescompressednet()            { return q_getbytescompressednet.execl(); };
-ulong QddaDB::getused(ulong min)                 { return q_getused.execl(min); };
-void QddaDB::report_files(const string& tabs)    { q_listfiles.report(tabs); };
-void QddaDB::report_dedupe(const string& tabs)   { q_hist_dedupe.report(tabs); };
-void QddaDB::report_compress(const string& tabs) { q_hist_compress.report(tabs); };
-
-const string QddaDB::getarrayid() { return q_getarrayid.exectext(); }
 

@@ -19,11 +19,15 @@ struct option;
 
 #define string std::string
 
-// Debugging, messaging
+/*******************************************************************************
+ * Debugging and messaging
+ ******************************************************************************/
+
+#ifdef __DEBUG
 void dumpvars_exp(const char* names, int, ...);
 void debugMsg(const char*, int); // show line and filename
 
-#define where              debugMsg(__FILE__,__LINE__);
+#define debug              debugMsg(__FILE__,__LINE__);
 #define dumpline           std::cout << __LINE__ << " ";
 // show one or up to three variable names and values
 #define dvar(v)            std::cout << #v << "=" << v << " "
@@ -31,12 +35,20 @@ void debugMsg(const char*, int); // show line and filename
 #define dumpvar2(p1,p2)    dvar(p1); dvar(p2); std::cout << std::endl << std::flush
 #define dumpvar3(p1,p2,p3) dvar(p1); dvar(p2); dvar(p3); std::cout << std::endl << std::flush
 
+#define RELEASE "B"
+#else
+#define RELEASE ""
+#endif
+
 // Spartan error handling, just quit with error if something goes wrong
 void die(string errMsg, int rc=10);
 
-// string stuff
+/*******************************************************************************
+ * String functions
+ ******************************************************************************/
+
 bool isNum(const string& s);    // true if string only has digits
-void toUpper(char *str);             // convert a string to uppercase (inplace)
+void toUpper(char *str);        // convert a string to uppercase (inplace)
 void toUpper(string& str);      // same with string instead of char*
 void searchReplace(string& src, string const& find, string const& repl); // global inplace search/replace within string
 
@@ -47,11 +59,16 @@ template <typename T> string toString(const T value, const int n = 2) {
   return out.str();
 }
 
-// file stuff
-int fileExists(const char * fn);                        // return true if file exists
-std::ifstream::pos_type fileSize(const char* filename); // return size of file in bytes
+/*******************************************************************************
+ * Files
+ ******************************************************************************/
 
-// calc stuff
+int fileExists(const char * fn);                        // return true if file exists
+
+/*******************************************************************************
+ * Calculations
+ ******************************************************************************/
+
 inline ulong square(ulong x)                 { return x * x; };
 inline int   maxint(int x, int y)            { return x>y?x:y; };
 inline int   minint(int x, int y)            { return x<y?x:y; };
@@ -60,15 +77,24 @@ inline ulong safeDiv_ulong(ulong x, ulong y) { return (y==0) ? 0 : x / y; }  // 
 inline ulong divRoundUp(ulong x, ulong y)    { return (x%y) ? x/y+1 : x/y; } // long integer division but round up instead of round down
 inline ulong longRand()                      { return ((ulong)rand() << 32) + rand() ; }  // 64-bit ulong random
 
-// System info
-int   cpuCount();       // return number of cpus (cores)
-ulong epoch();          // secs since 1970
-const char* hostName(); // system hostname
-const char* whoAmI();   // path to self
-const string& homeDir();
-long fileSystemFree(const char* path);
 
-// stopwatch class in microseconds - keep track of processing time
+/*******************************************************************************
+ * System related info
+ ******************************************************************************/
+
+int   cpuCount();        // return number of cpus (cores)
+ulong epoch();           // secs since 1970
+const char* hostName();  // system hostname
+const char* whoAmI();    // path to self
+const string& homeDir();
+long fileSystemFree(const char* filename); // filesystem free in MB for this file
+off_t fileSize(const char *filename);      // return size of file in bytes
+void armTrap();                            // interrupt handler
+
+/*******************************************************************************
+ * Stopwatch - a timer class that keeps track of time in microseconds
+ ******************************************************************************/
+
 class Stopwatch {
   std::chrono::high_resolution_clock::time_point t1,t2;
   const ulong diff() const;
@@ -81,7 +107,10 @@ public:
   operator ulong()  { return diff(); }                                                 // returns saved laptime
 };
 
-// Array of strings, dynamic allocation
+/*******************************************************************************
+ * StringArray - holds a variable number of strings (using std::vector)
+ ******************************************************************************/
+
 class StringArray {
   std::vector<string> v_string;
 public:
@@ -92,7 +121,13 @@ public:
   friend std::ostream& operator<< (std::ostream&, StringArray&);
 };
 
-// A class that holds options for arguments processing
+/*******************************************************************************
+ * LongOptions - class that holds options for arguments processing
+ * The option list can be built by adding option items
+ * each option item modifies a variable or executes a void() function
+ * It can print the options in help style or as a man page section
+ ******************************************************************************/
+
 class LongOptions {
   struct Option {
     const char*  name;
@@ -107,15 +142,20 @@ class LongOptions {
   };
 public:
   LongOptions() { val = 1024; };
-  void  add(bool& b,     int val, const char* name, const char* par, const char* desc);
-  void  add(int& p,      int val, const char* name, const char* par, const char* desc);
-  void  add(ulong& p,    int val, const char* name, const char* par, const char* desc);
-  void  add(string& str, int val, const char* name, const char* par, const char* desc);
-  void  add(void (*f)(),      int val, const char* name, const char* par, const char* desc);
+  // each add function takes a variable, 
+  void  add(const char* name, char c, const char* p, bool&   v,   const char* desc);
+  void  add(const char* name, char c, const char* p, int&    v,   const char* desc);
+  void  add(const char* name, char c, const char* p, ulong&  v,   const char* desc);
+  void  add(const char* name, char c, const char* p, string& v,   const char* desc);
+  void  add(const char* name, char c, const char* p, void (*f)(), const char* desc);
+  
+  
+  
+  
+  
   int   hasarg(int i) { return strlen(opts[i].optname)?1:0; }
   void  printhelp(std::ostream& os);
   void  printman(std::ostream& os);
-  void  help();
   const option* long_opts();
   int   parse(int argc, char** argv);
 private:

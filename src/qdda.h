@@ -32,9 +32,7 @@ void  analyze(Filelist& filelist, QddaDB& db, Parameters& parameters);
  ******************************************************************************/
 
 // Valid menu actions
-enum class MenuOpt { none, import, vacuum, dbtest, ptest, xrep, skip, version };
-struct Parameters;
-
+//struct Parameters;
 
 // Vectored list of open streams (files)
 class Filelist {
@@ -56,19 +54,17 @@ private:
 struct Parameters {
   std::string tmpdir;
   std::string array;
+  std::string import;
   int  bandwidth; // default bandwidth throttle (MB/s)
   int  workers;   // number of workers (threads)
   int  readers;   // max number of readers
   int  buffers;   // override read buffers
   bool do_help;
   bool do_mandump;
-  std::string import;
-  //bool do_import;
   bool do_cputest;
   bool do_dbtest;
   bool do_purge;
   bool do_delete;
-  bool debug;
   bool queries;
   bool skip;
   bool dryrun;

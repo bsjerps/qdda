@@ -107,11 +107,11 @@ void report(QddaDB& db) {
   
   float ratio_total = ratio_dedup*ratio_compr*ratio_thin; // overall storage reduction
 
-  float fsize = fileSize(db.filename()) * bytes2mb; // file size in MiB
+  float filesize = fileSize(db.filename()) * bytes2mb; // file size in MiB
 
   cout
   << endl << "Database info (" << db.filename() << "):"
-  << endl << formatName("database size")       << setprecision(2) << fixed << fsize << " MiB"
+  << endl << formatName("database size")       << setprecision(2) << fixed << filesize << " MiB"
   << endl << formatName("array id")            << arrayid
   << endl << formatName("blocksize")           << toString(blocksize) + " KiB"
   << endl

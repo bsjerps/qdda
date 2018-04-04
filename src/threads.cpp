@@ -25,14 +25,17 @@
 
 using namespace std;
 
-const ulong blockspercycle = 128; // read x blocks at a time
+// const ulong blockspercycle = 256; // read x blocks at a time
+const ulong iosize = 1024; // kilobytes per IO
 
 extern bool g_debug;
 extern bool g_quiet;
+extern bool g_abort;
 //extern ofstream c_verbose;
 //extern ofstream c_debug;
 
 DataBuffer::DataBuffer(ulong blocksize) {
+  ulong blockspercycle = (iosize * 1024) / blocksize;
   blocksize_kb = blocksize * 1024;
   bufsize      = blocksize_kb * blockspercycle;
   readbuf      = new char[bufsize];
@@ -58,25 +61,20 @@ char* DataBuffer::operator[](int n) {
   return readbuf + (n*blocksize_kb);
 }
 
-
 IOThrottle::IOThrottle(ulong m) {
-  pthread_mutex_init(&mutex,0);
   mibps = m;
-}
-IOThrottle::~IOThrottle() {
-  pthread_mutex_destroy(&mutex);
 }
 
 // Request to read x kb, microsleep to match required bandwidth
-void IOThrottle::request(ulong blocks_kb) {
+void IOThrottle::request(ulong kb) {
   if(!mibps) return; // immediately return if we don't throttle
-  pthread_mutex_lock(&mutex);
+  mutex.lock();
   stopwatch.lap();
-  ulong microsec = (1024 * blocks_kb) / mibps;
+  ulong microsec = (1024 * kb) / mibps;
   if(microsec > stopwatch)
     usleep(microsec - stopwatch);
   stopwatch.reset();
-  pthread_mutex_unlock(&mutex);
+  mutex.unlock();
 }
 
 SharedData::SharedData(int buffers, int files, ulong blksz, StagingDB* db, int bw): 
@@ -84,6 +82,7 @@ SharedData::SharedData(int buffers, int files, ulong blksz, StagingDB* db, int b
 {
   bufsize        = buffers;
   blocksize      = blksz;
+  blockspercycle = (iosize * 1024) / blocksize;
   read_completed = false;
   blocks         = 0;
   bytes          = 0;
@@ -107,10 +106,10 @@ int SharedData::size() { return bufsize; }
 
 long threadPid() { return (long int)syscall(SYS_gettid); }
 
-void printthread(pthread_mutex_t* p_mutex, string msg) {
-  pthread_mutex_lock(p_mutex);
+void printthread(Mutex& mutex, string msg) {
+  mutex.lock();
   if(g_debug) std::cerr << msg << std::endl << std::flush;
-  pthread_mutex_unlock(p_mutex);
+  mutex.unlock();
 }
 
 int getFreeBlock(SharedData& sd) {
@@ -123,6 +122,7 @@ int getFreeBlock(SharedData& sd) {
     sd.mutex_self.lock();
     sd.rsleeps++;
     sd.mutex_self.unlock();
+    if(g_abort) return 0;
     usleep(10000);    // no unlocked buffers, sleep
   }
 }
@@ -144,22 +144,23 @@ int getUsedBlock(SharedData& sd, int& idx) {
   }
 }
 
+
 // read a stream(file) into available buffers
 ulong readstream(int thread, SharedData& shared,  ifstream& ifs) {
   ulong rbytes,blocks;
   ulong totbytes=0;
   const ulong blocksize = shared.blocksize;
-  int idx=0;
   while(!ifs.eof()) {
-    idx=getFreeBlock(shared);
-    shared.throttle.request(blocksize*blockspercycle);
-    ifs.read(shared.v_databuffer[idx].readbuf, blocksize*1024*blockspercycle);
+    int i=getFreeBlock(shared);
+    if(g_abort) return 0;
+    shared.throttle.request(iosize * 1024);
+    ifs.read(shared.v_databuffer[i].readbuf, blocksize*1024*shared.blockspercycle);
     rbytes     = ifs.gcount();
     blocks     = rbytes / blocksize / 1024; // full blocks
     blocks    += rbytes%blocksize*1024?1:0; // partial block, add 1
     totbytes  += rbytes;
-    shared.v_databuffer[idx].used = blocks;
-    shared.v_databuffer[idx].unlock();
+    shared.v_databuffer[i].used = blocks;
+    shared.v_databuffer[i].unlock();
   }
   return totbytes;
 }
@@ -168,29 +169,28 @@ ulong readstream(int thread, SharedData& shared,  ifstream& ifs) {
 // each reader handles 1 file at a time
 void reader(int thread, SharedData& sd, Filelist& filelist) {
   pthread_setname_np(pthread_self(), "qdda-reader");
-  int numfiles = filelist.size();
-  ulong bytes,rc;
-  for(int i=0; i<numfiles; i++) {
+  ulong rc;
+  for(int i=0; i<filelist.size(); i++) {
     rc=sd.a_mutex_files[i].trylock();
     if(rc==0) {
-      bytes = readstream(thread, sd, filelist[i]);
+      ulong bytes = readstream(thread, sd, filelist[i]);
       sd.p_sdb->savemeta(filelist.name(i), bytes/sd.blocksize/1024, bytes);
     }
     // deliberately refusing to unlock so files never get read multiple times
   }
-  
 }
 
 void worker(int thread, SharedData& sd, Parameters& parameters) {
   pthread_setname_np(pthread_self(), "qdda-worker");
   const ulong blocksize = sd.blocksize;
-  ulong* p_hash   = new ulong[blockspercycle];
-  ulong* p_cbytes = new ulong[blockspercycle];
+  ulong* p_hash   = new ulong[sd.blockspercycle];
+  ulong* p_cbytes = new ulong[sd.blockspercycle];
   char* dummy     = new char[blocksize*1024];
   int idx=0;
   for(;;) {
     if(getUsedBlock(sd,idx)) break;
     for(int i=0; i < sd.v_databuffer[idx].used; i++) {
+      if(g_abort) return;
       DataBuffer& r_blockdata = sd.v_databuffer[idx];
       p_hash[i]   = hash_md5(r_blockdata[i], dummy, blocksize*1024);
       p_cbytes[i] = p_hash[i] ? compress(r_blockdata[i], dummy, blocksize*1024) : 0;
@@ -201,8 +201,11 @@ void worker(int thread, SharedData& sd, Parameters& parameters) {
       sd.bytes += blocksize*1024;
       sd.mutex_self.unlock();
       sd.mutex_output.lock();
-      if(sd.blocks%10000==0)
+      if(sd.blocks%10000==0) {
         progress(sd.blocks, blocksize, sd.bytes);           // progress indicator
+//        if(fileSystemFree(sd.p_sdb->filename()) < 256) die(string("\nfile system almost full! - ") + sd.p_sdb->filename());
+        
+      }
       sd.mutex_output.unlock();
     }
     if(!parameters.dryrun) {
@@ -234,16 +237,17 @@ void analyze(Filelist& filelist, QddaDB& db, Parameters& parameters) {
 
   int workers     = parameters.workers;
   int readers     = min(filelist.size(), parameters.readers);
-  int buffers     = parameters.buffers ? parameters.buffers : workers + readers + 2;
+  int buffers     = parameters.buffers ? parameters.buffers : workers + readers + 8;
   ulong blocksize = db.getblocksize();
 
   SharedData sd(buffers, filelist.size(), blocksize, &stagingdb, parameters.bandwidth);
 
-  if(!g_quiet) cout << "Scanning " << filelist.size() << " files, " 
-            << readers << " readers, " 
-            << workers << " workers, "
-            << buffers << " buffers, "
-            << parameters.bandwidth << " MB/s max" << endl;
+  if(!g_quiet) cout
+    << "Scanning " << filelist.size() << " files, " 
+    << readers << " readers, " 
+    << workers << " workers, "
+    << buffers << " buffers, "
+    << parameters.bandwidth << " MB/s max" << endl;
 
   thread reader_thread[readers];
   thread worker_thread[workers];
@@ -252,7 +256,7 @@ void analyze(Filelist& filelist, QddaDB& db, Parameters& parameters) {
   for(int i=0; i<workers; i++) worker_thread[i] = thread(worker, i, std::ref(sd), std::ref(parameters));
   for(int i=0; i<readers; i++) reader_thread[i] = thread(reader, i, std::ref(sd), std::ref(filelist));
 
-  for(int i=0; i<readers; i++) reader_thread[i].join(); 
+  for(int i=0; i<readers; i++) reader_thread[i].join();
   sd.read_completed = true;
   for(int i=0; i<workers; i++) worker_thread[i].join();
 
@@ -270,5 +274,9 @@ void analyze(Filelist& filelist, QddaDB& db, Parameters& parameters) {
   if(g_debug) cerr << "Blocks processed " << sumblocks 
             << ", bytes = " << sumbytes
             << " (" << fixed << setprecision(2) << sumbytes/1024.0/1024 << " MiB)" << endl;
+  if(g_abort) {
+    stagingdb.close();
+    Database::deletedb(tmpname);
+  }
 }
 

@@ -17,15 +17,21 @@
 
 #include <unistd.h>
 #include <limits.h>
+#include <sys/stat.h>
 #include <sys/types.h>
+#include <stdio.h>
 #include <sys/statvfs.h>
 #include <pwd.h>
 #include <getopt.h>
+#include <signal.h>
 
 #include "tools.h"
 
+#define string std::string
+
+extern bool g_abort;
 // Die with error message - severe errors (should not happen)
-void die(std::string errmsg,int rc) { 
+void die(string errmsg,int rc) { 
   std::cerr << "Error: " << errmsg << " " << std::endl << std::flush;
   exit(rc);
 }
@@ -44,7 +50,7 @@ void toUpper(char *s) {
 }
 
 // Same for std::string
-void toUpper(std::string& str) {
+void toUpper(string& str) {
   char buf[str.size()];
   strcpy(buf,str.c_str());
   toUpper(buf);
@@ -58,10 +64,18 @@ int fileExists(const char * fn) {
   return 0;
 }
 
+/*
 // File size in bytes
 std::ifstream::pos_type fileSize(const char* filename) {
   std::ifstream in(filename, std::ifstream::ate | std::ifstream::binary);
   return in.tellg(); 
+}*/
+
+off_t fileSize(const char *filename) {
+  struct stat st; 
+  if (stat(filename, &st) == 0)
+    return st.st_size;
+  return -1; 
 }
 
 // stopwatch - get lap time
@@ -70,20 +84,20 @@ const ulong Stopwatch::diff() const {
 }
 
 // stopwatch - show time as seconds, format #.##
-const std::string Stopwatch::seconds() const {
+const string Stopwatch::seconds() const {
   return toString((float)diff()/1000000,2);
 }
 
 // stopwatch - show time in microsec
-const std::string Stopwatch::runtime() const {
+const string Stopwatch::runtime() const {
   std:: stringstream ss;
   ss << "runtime " << diff() << " microsec (" << seconds() << " s)";
   return ss.str();
 }
 
 // search and replace within string
-void searchReplace(std::string& source, std::string const& find, std::string const& replace) {
-  for(std::string::size_type i = 0; (i = source.find(find, i)) != std::string::npos;) {
+void searchReplace(string& source, string const& find, string const& replace) {
+  for(string::size_type i = 0; (i = source.find(find, i)) != string::npos;) {
     source.replace(i, find.length(), replace);
     i += replace.length();
   }
@@ -110,8 +124,8 @@ const char* whoAmI() {
 }
 
 // get homedir from $HOME or from pw_dir if $HOME is invalid
-const std::string& homeDir() {
-  static std::string homedir;
+const string& homeDir() {
+  static string homedir;
   const char* envhome = getenv("HOME");
   const char* pwdhome = getpwuid(getuid())->pw_dir;
   if(!envhome) homedir = pwdhome;
@@ -120,17 +134,17 @@ const std::string& homeDir() {
   return homedir;
 }
 
-// get filesystem free in bytes
+// get filesystem free in MiB
 long fileSystemFree(const char* path) {
   struct statvfs stat;
   if (statvfs(path, &stat) != 0) return -1;
-  return stat.f_bsize * stat.f_bavail;
+  return (stat.f_bsize * stat.f_bavail)/1048576;
 }
 
 // Stringarray functions
 
 // Add a string to the array
-StringArray& StringArray::operator+=(const std::string& s) {
+StringArray& StringArray::operator+=(const string& s) {
   v_string.push_back(s);
   return *this;
 }
@@ -142,7 +156,7 @@ StringArray& StringArray::operator+=(const ulong var) {
 }
 
 // Return element i in string
-const std::string& StringArray::operator[](int i) {
+const string& StringArray::operator[](int i) {
   if(i>=v_string.size()) 
     die ("Index out of range for StringArray");
   return v_string[i];
@@ -150,14 +164,14 @@ const std::string& StringArray::operator[](int i) {
 
 // Dump the entire array to ostream
 std::ostream& operator<<(std::ostream& stream, StringArray& s) {
-  std::vector<std::string> v_string;
-  for(std::vector<std::string>::iterator i = s.v_string.begin(); i != s.v_string.end(); i++)
+  std::vector<string> v_string;
+  for(std::vector<string>::iterator i = s.v_string.begin(); i != s.v_string.end(); i++)
     stream << *i << std::endl;
   return stream;
 }
 
 // Test if string is digits only
-bool isNum(const std::string& s) {
+bool isNum(const string& s) {
   char* p;
   strtol(s.c_str(), &p, 10);
   return *p == 0;
@@ -172,38 +186,52 @@ int cpuCount() {
 /*******************************************************************************
  * LongOptions class functions
  ******************************************************************************/
+/*
+ void  add(const char* name, char val, const char* par, bool& b,     const char* desc);
+  void  add(const char* name, char val, const char* par, int& p,      const char* desc);
+  void  add(const char* name, char val, const char* par, ulong& p,    const char* desc);
+  void  add(const char* name, char val, const char* par, string& str, const char* desc);
+  void  add(const char* name, char val, const char* par, void (*f)(), const char* desc);
+  * 
+  * 
+  void  add(const char* name, char c, const char* p, bool&   v,   const char* desc);
+  void  add(const char* name, char c, const char* p, int&    v,   const char* desc);
+  void  add(const char* name, char c, const char* p, ulong&  v,   const char* desc);
+  void  add(const char* name, char c, const char* p, string& v,   const char* desc);
+  void  add(const char* name, char c, const char* p, void (*f)(), const char* desc);
   
-void LongOptions::add(bool& pp,int v, const char* name, const char* optname, const char* desc) {
-  opts.push_back( (Option) { name, v?v:++val, optname, desc, NULL } );
-  opts.back().p_bool = &pp;
+  */
+  
+void LongOptions::add(const char* name, char c, const char* p, bool&  v, const char* desc) {
+  opts.push_back( (Option) { name, c?c:++val, p, desc } );
+  opts.back().p_bool = &v;
 }
 
-void LongOptions::add(int& pp,int v, const char* name, const char* optname, const char* desc) {
-  opts.push_back( (Option) { name, v?v:++val, optname, desc } );
-  opts.back().p_int = &pp;
+void LongOptions::add(const char* name, char c, const char* p, int&   v, const char* desc) {
+  opts.push_back( (Option) { name, c?c:++val, p, desc } );
+  opts.back().p_int = &v;
 }
 
-void LongOptions::add(ulong& pp,int v, const char* name, const char* optname, const char* desc) {
-  opts.push_back( (Option) { name, v?v:++val, optname, desc } );
-  opts.back().p_ulong = &pp;
+void LongOptions::add(const char* name, char c, const char* p, ulong& v, const char* desc) {
+  opts.push_back( (Option) { name, c?c:++val, p, desc } );
+  opts.back().p_ulong = &v;
 }
 
-void LongOptions::add(std::string& rstr,int v, const char* name, const char* optname, const char* desc) {
-  opts.push_back( (Option) { name, v?v:++val, optname, desc } );
-  opts.back().p_str = &rstr;
+void LongOptions::add(const char* name, char c, const char* p, string& v, const char* desc) {
+  opts.push_back( (Option) { name, c?c:++val, p, desc } );
+  opts.back().p_str = &v;
 }
 
-void LongOptions::add(void (*f)(),int v, const char* name, const char* optname, const char* desc) {
-  opts.push_back( (Option) { name, v?v:++val, optname, desc } ); // , NULL, NULL, NULL, f } );
+void LongOptions::add(const char* name, char c, const char* p, void (*f)(), const char* desc) {
+  opts.push_back( (Option) { name, c?c:++val, p, desc } );
   opts.back().func = f;
 }
 
 void LongOptions::printhelp(std::ostream& os) {
-  // std::cout << "qdda " << PROGVERSION << title_info   << "\nUsage: qdda <options> [FILE]...\nOptions:" << "\n";
   for(int i=0;i<opts.size();i++) {
-    std::string shortp, longp;
-    if(opts[i].val<255) shortp = std::string("-") + std::string(1, opts[i].val) + ", ";
-    longp = std::string("--") + opts[i].name + " " + opts[i].optname;
+    string shortp, longp;
+    if(opts[i].val<255) shortp = string("-") + string(1, opts[i].val) + ", ";
+    longp = string("--") + opts[i].name + " " + opts[i].optname;
     os << std::setw(4) << std::left << shortp
        << std::setw(22) << std::left << longp
        << std::left << opts[i].desc
@@ -214,9 +242,9 @@ void LongOptions::printhelp(std::ostream& os) {
 
 void LongOptions::printman(std::ostream& os) {
   for(int i=0;i<opts.size();i++) {
-    std::string shortp, longp;
-    if(opts[i].val<255) shortp = std::string("-") + std::string(1, opts[i].val) + ", ";
-    longp = std::string("--") + opts[i].name + " " + opts[i].optname;
+    string shortp, longp;
+    if(opts[i].val<255) shortp = string("-") + string(1, opts[i].val) + ", ";
+    longp = string("--") + opts[i].name + " " + opts[i].optname;
     os << ".TP\n.B \\" << shortp << longp
        << "\n" << opts[i].desc
        << ".P\n";
@@ -236,7 +264,7 @@ const option* LongOptions::long_opts() {
 
 int LongOptions::parse(int argc, char** argv) {
   int c;
-  std::string optstr = "+h";
+  string optstr = "+h";
   for(int i=0;i<opts.size();i++) {
     if(opts[i].val<255) {
       optstr += opts[i].val;
@@ -261,3 +289,14 @@ int LongOptions::parse(int argc, char** argv) {
   return 0;
 }
 
+/* Signal Handler for SIGINT */
+void setabort(int sig_num) {
+  /* Reset handler to catch SIGINT next time.
+  Refer http://en.cppreference.com/w/c/program/signal */
+  signal(SIGINT, setabort);
+  g_abort = true;  
+}
+
+void armTrap() {
+  signal(SIGINT, setabort);
+}

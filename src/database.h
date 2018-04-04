@@ -56,9 +56,9 @@ public:
   const string exectext();
   void  report(const string& tabs);
 private:
-  void  step();
-  void  reset();
-  int   prep(sqlite3* db, const char* query);
+  int step();
+  int reset();
+  int prep(sqlite3* db, const char* query);
   int ref; // param refcount
   sqlite3_stmt *pStmt;
 };
@@ -71,6 +71,7 @@ public:
   Database(const string& fn);
   ~Database();
   const char*  filename();
+  ulong        filesize();
   int          unlinkdb();
   static int   createdb(const string& fn, const char* schema);
   static int   deletedb(const string& fn);
@@ -90,6 +91,7 @@ protected:
 class StagingDB: public Database {
 public:
   StagingDB(const string& fn);
+ ~StagingDB(); 
   static void  createdb(const string& fn, ulong blocksize);
   ulong        getblocksize();
   ulong        getrows();
@@ -121,12 +123,12 @@ public:
   void         merge(const string&);
   int          insbucket(const char *,ulong, ulong);
   void         set_comp_method();
-  void         setmetadata(string);
-
+  void         setmetadata(int blocksize, const string& compr, const string& name, const string& buckets);
+  void         parsemetadata(string);
   ulong        getallocated();
   ulong        getzero();
   ulong        gettotal();
-  ulong        getused(ulong min=0);
+  ulong        getused();
   ulong        getunique();
   ulong        getnuniq();
   ulong        getdeduped();

@@ -30,12 +30,12 @@ public:
  ~DataBuffer();
   int   trylock();
   void  unlock();
-  void  reset();         // clear buffer and temp counters;
-  ulong bufsize;         // size of the read buffer in bytes
-  int   used;            // number of read blocks in the structure
-  ulong blocks;          // blocks read
-  ulong bytes;           // bytes read
-  char* readbuf;         // the actual data
+  void  reset();           // clear buffer and temp counters;
+  ulong bufsize;           // size of the read buffer in bytes
+  int   used;              // number of read blocks in the structure
+  ulong blocks;            // blocks read
+  ulong bytes;             // bytes read
+  char* readbuf;           // the actual data
   char* operator[](int n); // access to the nth buffer
 private:
   ulong blocksize_kb;
@@ -46,12 +46,11 @@ private:
 // IOThrottle holds shared data to provide IO bandwidth throttling
 class IOThrottle {
 public:
-  IOThrottle(ulong);        // Initialize with megabytes per sec value
- ~IOThrottle();             
-  void request(ulong);      // request to read a number of 1k blocks
+  IOThrottle(ulong mibps);  // Initialize with megabytes per sec value
+  void request(ulong kb);   // request to read a number of 1k blocks
   ulong mibps;              // the bandwidth
   Stopwatch stopwatch;      // track time between requests
-  pthread_mutex_t mutex;
+  Mutex mutex;
 };
 
 // Shared data for easy sharing between threads
@@ -72,6 +71,7 @@ public:
   Mutex                   mutex_database;
   Mutex                   mutex_self;
   Mutex*                  a_mutex_files;
-private:                  
+  int                     blockspercycle;
+private:
   int                     bufsize;
 };

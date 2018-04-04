@@ -42,7 +42,6 @@
 #include <unistd.h>
 #include <lz4.h>
 #include <pthread.h>
-// #include <getopt.h>
 
 #include <stdlib.h>     /* srand, rand */
 
@@ -61,7 +60,7 @@ using namespace std;
  * global parameters - modify at own discretion
  ******************************************************************************/
 
-const char* PROGVERSION   = "1.9.2B";
+const char* PROGVERSION   = "1.9.2" RELEASE;
 const char* DEFAULT_TMP    = "/var/tmp"; // tmpdir for SQLite temp files
 const ulong DEFAULT_BANDWIDTH = 200;     //
 
@@ -78,13 +77,10 @@ const ulong MEBIBYTE          = 1048576; // Bytes per MiB
 bool g_debug = false; // global debug flag
 bool g_query = false; // global query flag
 bool g_quiet = false; // global quiet flag
+bool g_abort = false; // global signal flag - true if ctrl-c was pressed (sigterm)
 
 ofstream c_debug;                             // Debug stream, open with -D option
-// ofstream c_verbose("/dev/tty");               // Progress stream, disable with -q option
 ulong    starttime = epoch();                 // start time of program
-
-//Options options;
-//ulong Block_t::blocksize = 0; // static initialization outside class
 
 int Filelist::size() {   return ifs.size(); }
 
@@ -93,7 +89,7 @@ ifstream& Filelist::operator[](uint i) {
   return *ifs[i];
 };
 
-const std::string& Filelist::name(int i) {
+const string& Filelist::name(int i) {
   if(i>size()) die("File index error");
   return filename[i];
 }
@@ -109,11 +105,11 @@ void Filelist::open(const char * file) {
   c_debug << "Opening: " << file << endl;
   ifs.back()->open(file);
   if (!ifs.back()->is_open()) {
-    string msg = "File open failed (try: sudo setfacl -m u:";
+    string msg = "File open failed, try:\nsudo setfacl -m u:";
     msg += getenv ("USER");
     msg += ":r ";
     msg += file;
-    msg += ")";
+    msg += "\n";
     die(msg);
   }
 }
@@ -139,7 +135,7 @@ extern const char* manpage_head;
 extern const char* manpage_body;
 
 void showtitle()   { if(!g_quiet) cout << "qdda " << PROGVERSION << title_info ; }
-void showversion() { std::cout << version_info << std::endl; exit(0); }
+void showversion() { showtitle(); std::cout << version_info << std::endl; exit(0); }
 void longhelp()    { std::cout << qdda_longhelp << std::endl; }
 
 /*******************************************************************************
@@ -275,6 +271,8 @@ void merge(QddaDB& db, Parameters& parameters) {
   auto tmprows       = sdb.getrows();
   auto mib_staging   = tmprows*blocksize/1024;
   auto mib_database  = dbrows*blocksize/1024;
+  auto fsize1        = db.filesize();
+  auto fsize2        = sdb.filesize();
 
   if(blocksize != sdb.getblocksize()) die ("Incompatible blocksize");
   
@@ -433,15 +431,6 @@ const string& defaultDbName() {
   return dbname;
 }
 
-int experiment() {
-  int rc = 0;
-  cout << homeDir() << endl;
-  dumpvar(__GNUC__);
-  dumpvar(__GNUC_MINOR__);
-  cout << fileSystemFree("/var/tmp") << endl;
-  exit(rc);
-}
-
 void showh(LongOptions& lo) {
   std::cout << "\nUsage: qdda <options> [FILE]...\nOptions:" << "\n";
   lo.printhelp(cout);
@@ -459,9 +448,10 @@ void mandump(LongOptions& lo) {
 
 int main(int argc, char** argv) {
   int rc = 0;
-  // experiment();
-  
-  MenuOpt    action = MenuOpt::none;
+
+  armTrap();
+
+
   string     dbname    = defaultDbName(); // DEFAULT_DBNAME;
   Parameters parameters = {};
   LongOptions opts;
@@ -475,35 +465,33 @@ int main(int argc, char** argv) {
   
   
 //  -B <blksize_kb>   : Set blocksize to blksize_kb kilobytes
-/*
-  -c <method|l>     : Compression method for reporting (use -c l to list methods)
-*/
-
+// --create ?
 
   Parameters& p = parameters;
-  opts.add(showversion,'V',"version"  , ""           , "show version and copyright info");
-  opts.add(p.do_help,  'h',"help"     , ""           , "show usage");
-  opts.add(dbname,     'd',"db"       , "<file>"     , "database file path (default $HOME/qdda.db)");
-  opts.add(g_quiet,    'q',"quiet"    , ""           , "Don't show progress indicator or intermediate results");
-  opts.add(p.bandwidth,'b',"bandwidth", "<mb/s>"     , "Throttle bandwidth in MB/s (default 200, 0=disable)");
-  opts.add(p.do_mandump,0 ,"mandump"  , ""           , "dump manpage to stdout");
-  opts.add(manpage,     0 ,"man"      , ""           , "show manpage");
-  opts.add(p.workers,   0 ,"workers"  , "<wthreads>" , "number of worker threads");
-  opts.add(p.readers,   0 ,"readers"  , "<rthreads>" , "(max) number of reader threads");
-  opts.add(p.buffers,   0 ,"buffers"  , "<buffers>"  , "number of buffers (debug only!)");
-  opts.add(p.dryrun,   'n',"dryrun"   , "aaa"           , "skip staging db updates during scan");
-  opts.add(p.array,     0 ,"array"    , "<arrayid>"  , "set array type/id");
-  opts.add(p.do_purge,  0 ,"purge"    , ""           , "Reclaim unused space in database (sqlite vacuum)");
-  opts.add(p.import,    0 ,"import"   , "<file>"     , "import another database (must have compatible metadata)");
-  opts.add(p.do_cputest,0 ,"cputest"  , ""           , "Single thread CPU performance test");
-  opts.add(p.do_dbtest, 0 ,"dbtest"   , "<testdata>" , "Database performance test");
-  opts.add(p.skip,      0 ,"nomerge"  , ""           , "Skip staging data merge and reporting, keep staging database");
-  opts.add(p.debug,     0 ,"debug"    , ""           , "Enable debug output");
-  opts.add(g_query,     0 ,"queries"  , ""           , "Show SQLite queries and results"); // --show?
-  opts.add(p.tmpdir,    0 ,"tempdir"  , "<dir>"      , "Set SQLite TEMPDIR (default /var/tmp");
-  opts.add(p.do_delete, 0 ,"delete"   , ""           , "Delete database");
-  opts.add(p.append,    0 ,"append"   , ""           , "Append data instead of deleting database");
-  opts.add(p.detail,   'x',"detail"   , ""           , "Detailed report (file info and dedupe/compression histograms)");
+
+  opts.add("version"  ,'V', ""           , showversion,  "show version and copyright info");
+  opts.add("help"     ,'h', ""           , p.do_help,    "show usage");
+  opts.add("db"       ,'d', "<file>"     , dbname,       "database file path (default $HOME/qdda.db)");
+  opts.add("quiet"    ,'q', ""           , g_quiet,      "Don't show progress indicator or intermediate results");
+  opts.add("bandwidth",'b', "<mb/s>"     , p.bandwidth,  "Throttle bandwidth in MB/s (default 200, 0=disable)");
+  opts.add("mandump"  , 0 , ""           , p.do_mandump, "dump manpage to stdout");
+  opts.add("man"      , 0 , ""           , manpage,      "show manpage");
+  opts.add("workers"  , 0 , "<wthreads>" , p.workers,    "number of worker threads");
+  opts.add("readers"  , 0 , "<rthreads>" , p.readers,    "(max) number of reader threads");
+  opts.add("buffers"  , 0 , "<buffers>"  , p.buffers,    "number of buffers (debug only!)");
+  opts.add("dryrun"   ,'n', ""           , p.dryrun,     "skip staging db updates during scan");
+  opts.add("array"    , 0 , "<arrayid>"  , p.array,      "set array type/id");
+  opts.add("purge"    , 0 , ""           , p.do_purge,   "Reclaim unused space in database (sqlite vacuum)");
+  opts.add("import"   , 0 , "<file>"     , p.import,     "import another database (must have compatible metadata)");
+  opts.add("cputest"  , 0 , ""           , p.do_cputest, "Single thread CPU performance test");
+  opts.add("dbtest"   , 0 , "<testdata>" , p.do_dbtest,  "Database performance test");
+  opts.add("nomerge"  , 0 , ""           , p.skip,       "Skip staging data merge and reporting, keep staging database");
+  opts.add("debug"    , 0 , ""           , g_debug,      "Enable debug output");
+  opts.add("queries"  , 0 , ""           , g_query,      "Show SQLite queries and results"); // --show?
+  opts.add("tempdir"  , 0 , "<dir>"      , p.tmpdir,     "Set SQLite TEMPDIR (default /var/tmp");
+  opts.add("delete"   , 0 , ""           , p.do_delete,  "Delete database");
+  opts.add("append"   , 0 , ""           , p.append,     "Append data instead of deleting database");
+  opts.add("detail"   ,'x', ""           , p.detail,     "Detailed report (file info and dedupe/compression histograms)");
 
   rc=opts.parse(argc,argv);
   if(rc) die ("Invalid option");
@@ -525,12 +513,12 @@ int main(int argc, char** argv) {
       QddaDB::createdb(dbname);
     }
   }
-  if((action == MenuOpt::dbtest || action == MenuOpt::ptest) && !parameters.append) {
+  if((p.do_dbtest || p.do_cputest) && !p.append) {
     Database::deletedb(dbname);
     QddaDB::createdb(dbname);
   }    
   QddaDB db(dbname);
-  db.setmetadata(parameters.array);
+  db.parsemetadata(parameters.array);
   if(filelist.size()>0) 
     analyze(filelist, db, parameters);
   if(p.do_purge)             { db.vacuum(); exit(0); }
