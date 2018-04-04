@@ -165,12 +165,14 @@ private:
   Query q_loadbuckets;
   Query q_truncbuckets;
 
-  Query q_hist_compress;
+
   Query q_listfiles;
   Query q_trunc_sums_compr;
   Query q_trunc_sums_deduped;
   Query q_update_sums_compr;
   Query q_update_sums_deduped;
+//  Query q_report_zeroes;
+  Query q_hist_compress;
   Query q_hist_dedupe;
 };
 

@@ -184,7 +184,8 @@ List available methods using option '-c l'
 .P
 .B Throttling:
 
-qdda processes a number of blocks per cycle (usually 64) and measures the service time. If the service time is too low it means the throughput is
+qdda processes a number of blocks per cycle (usually 64) and measures the service time. 
+If the service time is too low it means the throughput is
 higher than the bandwidth limit. The CPU is put to sleep for a number of microseconds to match the overall bandwidth limit.
 This prevents accidentally starving IO on a production host. Disable with '-b 0' option or set different bandwidth
 

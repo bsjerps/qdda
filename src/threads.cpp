@@ -25,14 +25,11 @@
 
 using namespace std;
 
-// const ulong blockspercycle = 256; // read x blocks at a time
 const ulong iosize = 1024; // kilobytes per IO
 
 extern bool g_debug;
 extern bool g_quiet;
 extern bool g_abort;
-//extern ofstream c_verbose;
-//extern ofstream c_debug;
 
 DataBuffer::DataBuffer(ulong blocksize) {
   ulong blockspercycle = (iosize * 1024) / blocksize;
@@ -44,16 +41,9 @@ DataBuffer::DataBuffer(ulong blocksize) {
   bytes        = 0;
 }
 
-DataBuffer::~DataBuffer() {
-  delete[] readbuf;
-}
-
-void DataBuffer::reset() {
-  memset(readbuf,0,bufsize);
-  used=0;
-}
-
-int DataBuffer::trylock() { return mutex.trylock(); } // return pthread_mutex_trylock(&mutex); }
+DataBuffer::~DataBuffer() { delete[] readbuf; }
+void DataBuffer::reset()  { memset(readbuf,0,bufsize); used=0; }
+int DataBuffer::trylock() { return mutex.trylock(); }
 void DataBuffer::unlock() { mutex.unlock(); }
 
 // access to the nth buffer
@@ -61,9 +51,7 @@ char* DataBuffer::operator[](int n) {
   return readbuf + (n*blocksize_kb);
 }
 
-IOThrottle::IOThrottle(ulong m) {
-  mibps = m;
-}
+IOThrottle::IOThrottle(ulong m) { mibps = m; }
 
 // Request to read x kb, microsleep to match required bandwidth
 void IOThrottle::request(ulong kb) {
@@ -144,7 +132,6 @@ int getUsedBlock(SharedData& sd, int& idx) {
   }
 }
 
-
 // read a stream(file) into available buffers
 ulong readstream(int thread, SharedData& shared,  ifstream& ifs) {
   ulong rbytes,blocks;
@@ -201,10 +188,10 @@ void worker(int thread, SharedData& sd, Parameters& parameters) {
       sd.bytes += blocksize*1024;
       sd.mutex_self.unlock();
       sd.mutex_output.lock();
-      if(sd.blocks%10000==0) {
+      if(sd.blocks%10000==0 || sd.blocks == 10) {
         progress(sd.blocks, blocksize, sd.bytes);           // progress indicator
-//        if(fileSystemFree(sd.p_sdb->filename()) < 256) die(string("\nfile system almost full! - ") + sd.p_sdb->filename());
-        
+//        if(fileSystemFree(sd.p_sdb->filename()) < 256) 
+//           die(string("\nfile system almost full! - ") + sd.p_sdb->filename());
       }
       sd.mutex_output.unlock();
     }

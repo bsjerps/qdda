@@ -120,7 +120,7 @@ int Query::prep(sqlite3 *db, const char * query) {
   const char * pzTest;
   int rc=sqlite3_prepare_v2(db, query, strlen(query), &pStmt, &pzTest);
   if(rc==SQLITE_OK) return 0;
-  cout << "MySQL prepare, return code: " << rc << endl;
+  cout << "MySQL prepare, query: " << query << endl;
   die(sqlite3_errmsg(db));
   return rc; // we never get here
 }
@@ -174,7 +174,7 @@ ulong Query::execl() {
   step();
   ulong retval = sqlite3_column_int64(pStmt, 0);
   if(g_query) std::cout << " = " << retval;
-  // add:   if(SQLITE_DONE!=sqlite3_step(stmt)) Die("SQL: Multiple return values for " + query);
+  // handle multiple rows returned (SQLITE_DONE)
   reset();
   return retval;
 }
@@ -218,32 +218,34 @@ void Query::report(const string& tabstr) {
     getline(ss,str,',');
     tabs.push_back(atoi(str.c_str()));
   }
+  if(g_query) { print(std::cout); cout << endl; }
   int cols = sqlite3_column_count(pStmt);
   for(int i=0;i<cols; i++) {
     if(tabs[i]>0) cout << std::left;
     else cout << std::right;
-    cout << std::setw(abs(tabs[i])) << sqlite3_column_name(pStmt,i) << separator ;
+    if(i<tabs.size()) cout << std::setw(abs(tabs[i]));
+    cout << sqlite3_column_name(pStmt,i);
+    if(i<cols-1) cout << separator;
   }
-  cout << endl; 
+  cout << endl;
 
   rc=sqlite3_step(pStmt);
   while(rc==SQLITE_ROW) {
     for(int i=0;i<cols;i++) {
       if(tabs[i]>0) cout << std::left;
       else cout << std::right;
-      
       int coltype = sqlite3_column_type(pStmt,i);
-      cout << std::setw(abs(tabs[i]));
+      if(i<tabs.size()) cout << std::setw(abs(tabs[i]));
+      cout << std::setprecision(2) << std::fixed;
       switch(coltype) {
         case SQLITE_INTEGER: cout << sqlite3_column_int64(pStmt,i) ; break;
         case SQLITE_TEXT:    cout << sqlite3_column_text(pStmt,i) ; break;
-        case SQLITE_FLOAT:   cout << sqlite3_column_double(pStmt,i) ; break;
+        case SQLITE_FLOAT:   cout << sqlite3_column_double(pStmt,i); break;
         case SQLITE_BLOB:    cout << "<blob>" ; break;
         case SQLITE_NULL:    cout << "-" ; break;
-        
-       // default:    cout << sqlite3_column_text(pStmt,i) << " " ; break;
+        default:             cout << "?" ; break;
       }
-      cout << separator; 
+      if(i<cols-1) cout << separator; 
     }
     cout << endl;
     rc=sqlite3_step(pStmt);
@@ -264,12 +266,10 @@ std::ostream& operator<<(std::ostream& stream, Query& statement) {
  * Database class functions
  ******************************************************************************/
 
-// Initialize with closed db
-Database::Database(const string& fn)
-{
-  int rc = 0;
+// Open existing DB
+Database::Database(const string& fn) {
   std::stringstream errmsg;
-  rc = sqlite3_open_v2(fn.c_str(), &db, SQLITE_OPEN_READWRITE, NULL);
+  int rc = sqlite3_open_v2(fn.c_str(), &db, SQLITE_OPEN_READWRITE, NULL);
   if(rc) { 
     errmsg << "Can't open database, filename: " << fn << ": " << (char *)sqlite3_errmsg(db);
     die(errmsg.str());
@@ -305,21 +305,16 @@ int Database::createdb(const string& fn, const char* schema) {
 }
 
 // detach tempdb and finalize all statements before closing db
-Database::~Database() {  
-  close(); 
-}
-
+Database::~Database()   { close(); }
 void Database::vacuum() { sql("vacuum"); }
 
-
 int Database::close() {
-  int rc = 0;
+  int rc;
   c_debug << "Closing DB " << filename() << std::endl;
   if(db) rc=sqlite3_close(db);
   db=NULL;
   return rc;
 }
-
 
 const char* Database::filename() {
   if(!db) return NULL;
@@ -375,25 +370,6 @@ void Database::sql(const string& query) {
   //c_query << ", " << stopwatch.runtime() << std::endl;
 }
 
-/*
-// run SQL statement, return ulong value (select)
-ulong SQLiteDB::getlong(const string& query) {
-  Stopwatch    stopwatch;
-  ulong        retval  = 0;
-  sqlite3_stmt *stmt   = NULL;
-  const char   *pzTest = NULL;
-  //showquery(query);
-  if(sqlite3_prepare_v2(db, query.c_str(), query.length(), &stmt, &pzTest)!=SQLITE_OK)  Die("SQL prepare error: " + query);
-  if(sqlite3_step(stmt)==SQLITE_ROW) { 
-    retval = sqlite3_column_int64(stmt, 0);
-    if(sqlite3_step(stmt)!=SQLITE_DONE) Die("SQL: Multiple return values for " + query);
-  }
-  sqlite3_finalize(stmt);
-  stopwatch.lap();
-  o_query << query << ", " << stopwatch.runtime() << std::endl;
-  return retval;
-}*/
-
 /*******************************************************************************
  * Staging DB class functions
  ******************************************************************************/
@@ -407,17 +383,11 @@ CREATE TABLE IF NOT EXISTS metadata(lock char(1) not null default 1
 , compression text
 ,constraint pk_t1 primary key(lock), constraint ck_t1_l check (lock=1));
 CREATE TABLE IF NOT EXISTS files(id integer primary key autoincrement, name TEXT, hostname TEXT, timestamp integer, blocks integer, bytes integer);
-CREATE TABLE IF NOT EXISTS staging(id integer primary key autoincrement,hash integer, bytes integer);
+CREATE TABLE IF NOT EXISTS staging(id integer primary key autoincrement default 0,hash integer, bytes integer);
 CREATE TABLE IF NOT EXISTS testdata(k integer, b integer);
 )");
-
   StagingDB newdb(fn);
-  // Query q_setblocksize(ttt,"insert into metadata (blksz) values (?)");
-  //q_setblocksize.prep(db,"insert into metadata (blksz) values (?)");
   newdb.setblocksize(blocksize);
-  
-  // debug
-  // sql("insert into metadata (blksz) values (" + to_string(blocksize,0) + ")");
 }
 
 StagingDB::StagingDB(const string& fn): Database(fn),
@@ -455,12 +425,11 @@ SELECT 0, 0 FROM rnd LIMIT ?1
   sql("PRAGMA cache_size = 10000");
   sql("PRAGMA locking_mode = EXCLUSIVE");
   */
+  // mmap_size limits the amount of linux memory cache slots, this avoids slowing down large scans
   sql("PRAGMA mmap_size = 65536");
 }
 
-StagingDB::~StagingDB() {
-}
-
+StagingDB::~StagingDB()  { }
 void StagingDB::begin()  { q_begin.exec(); }
 void StagingDB::end()    { q_end.exec(); }
 
@@ -529,11 +498,10 @@ QddaDB::QddaDB(const string& fn): Database(fn),
   q_trunc_sums_deduped   (db,"delete from m_sums_deduped"),
   q_update_sums_compr    (db,"insert into m_sums_compressed select * from v_sums_compressed"),
   q_update_sums_deduped  (db,"insert into m_sums_deduped select * from v_sums_deduped"),
-  
   q_hist_compress(db,"select * from v_compressed union all "
-                     "select 'Total:',sum(sum),sum(bucket_kb),sum(blocks),sum(mb) from v_compressed"),
+                     "select 'Total:', sum(buckets), sum(blocks),sum(MiB) from v_compressed"),
   q_hist_dedupe(db,"select * from v_deduped union all \n"
-                   "select 'Total:',sum(count),sum(bytes),sum(MiB) from v_deduped")
+                   "select 'Total:',sum(blocks),sum(bytes),sum(MiB) from v_deduped")
 {
   sql("PRAGMA schema_version");      // trigger error if not open
   sql("PRAGMA temp_store_directory = '" + tmpdir + "'");
@@ -586,8 +554,8 @@ select id as file
 from files;
 
 CREATE VIEW IF NOT EXISTS v_sums_deduped as
-select blocks ref, count(blocks) as count
-from kv where hash!=0 group by 1 order by blocks;
+select blocks ref, count(blocks) count
+from kv where hash!=0 group by 1 order by ref;
 
 CREATE VIEW IF NOT EXISTS v_sums_compressed as
 -- select 0 size, blocks, 0 bytes, 0 rawbytes from kv where hash=999 union all
@@ -606,18 +574,23 @@ from m_sums_compressed group by 2;
 
 CREATE VIEW IF NOT EXISTS v_compressed as 
 select size
-, sum
-, size*sum bucket_kb, (size*sum+blksz-1)/blksz blocks
-, (((size*sum+blksz-1)/blksz)*blksz+1023)/1024 mb
+, sum buckets
+-- , size*sum bucket_kb
+, (size*sum+blksz-1)/blksz blocks
+, cast((((size*sum+blksz-1)/blksz)*blksz+1023)/1024 as float) MiB
 from v_bucket_compressed;
 
 CREATE VIEW IF NOT EXISTS v_deduped as
+select 0 dup
+, blocks
+, (select blksz from metadata)*blocks*1024 bytes
+, cast((select blksz from metadata)*blocks/1024 as real) MiB
+from kv where hash=0 union all
 select ref
-, count
-, (select blksz from metadata)*1024*count bytes
-, (select blksz from metadata)*count/1024 MiB
+, count*ref blocks
+, (select blksz from metadata)*ref*count*1024 bytes
+, cast((select blksz from metadata)*ref*count/1024 as real) MiB
 from m_sums_deduped
--- union all select 0,blocks, 0, 0 from kv where hash=0;
 )");
 
 /* test stuff
