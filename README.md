@@ -15,6 +15,7 @@ Other features:
 
 - Does not scan just a sample - ALL data is scanned
 - Can be executed as non-root (for security reasons)
+- Non-Linux data (UNIX, Windows, VMware) can be scanned via IP (netcat/pipes)
 - Can scan live environments (such as prod database servers)
 - Blocksize adjustable between 1K and 128K
 - Built-in IO throttle to avoid overloading production systems (default 200MB/s)
