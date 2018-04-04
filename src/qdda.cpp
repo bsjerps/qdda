@@ -473,7 +473,6 @@ int main(int argc, char** argv) {
   opts.add("quiet"    ,'q', ""           , g_quiet,      "Don't show progress indicator or intermediate results");
   opts.add("bandwidth",'b', "<mb/s>"     , p.bandwidth,  "Throttle bandwidth in MB/s (default 200, 0=disable)");
   opts.add("mandump"  , 0 , ""           , p.do_mandump, "dump manpage to stdout");
-
   opts.add("workers"  , 0 , "<wthreads>" , p.workers,    "number of worker threads");
   opts.add("readers"  , 0 , "<rthreads>" , p.readers,    "(max) number of reader threads");
   opts.add("buffers"  , 0 , "<buffers>"  , p.buffers,    "number of buffers (debug only!)");
