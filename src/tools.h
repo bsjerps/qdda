@@ -8,15 +8,15 @@
  ******************************************************************************/
 
 #pragma once
+
 #include <chrono>
 #include <string>
 #include <vector>
 #include <sstream>
-#include <fstream>
-#include <iomanip>
 
 struct option;
 
+// dirty hack to improve readability
 #define string std::string
 
 /*******************************************************************************
@@ -35,7 +35,7 @@ void debugMsg(const char*, int); // show line and filename
 #define dumpvar2(p1,p2)    dvar(p1); dvar(p2); std::cout << std::endl << std::flush
 #define dumpvar3(p1,p2,p3) dvar(p1); dvar(p2); dvar(p3); std::cout << std::endl << std::flush
 
-#define RELEASE "B"
+#define RELEASE "Beta"
 #else
 #define RELEASE ""
 #endif
@@ -60,12 +60,6 @@ template <typename T> string toString(const T value, const int n = 2) {
 }
 
 /*******************************************************************************
- * Files
- ******************************************************************************/
-
-int fileExists(const char * fn);                        // return true if file exists
-
-/*******************************************************************************
  * Calculations
  ******************************************************************************/
 
@@ -87,6 +81,7 @@ ulong epoch();           // secs since 1970
 const char* hostName();  // system hostname
 const char* whoAmI();    // path to self
 const string& homeDir();
+int fileExists(const char * fn);           // return true if file exists
 long fileSystemFree(const char* filename); // filesystem free in MB for this file
 off_t fileSize(const char *filename);      // return size of file in bytes
 
@@ -104,9 +99,9 @@ public:
   Stopwatch()       { reset();}
   void reset()      { t1 = std::chrono::high_resolution_clock::now(); t2=t1;}          // reset timers
   const ulong lap() { t2 = std::chrono::high_resolution_clock::now(); return diff(); } // save laptime and return diff
-  const string seconds() const;                                                   // return seconds in #.## format
-  const string runtime() const;                                                   // return runtime message
-  operator ulong()  { return diff(); }                                                 // returns saved laptime
+  const string seconds() const;        // return seconds in #.## format
+  const string runtime() const;        // return runtime message
+  operator ulong()  { return diff(); } // returns saved laptime
 };
 
 /*******************************************************************************
@@ -150,11 +145,6 @@ public:
   void  add(const char* name, char c, const char* p, ulong&  v,   const char* desc);
   void  add(const char* name, char c, const char* p, string& v,   const char* desc);
   void  add(const char* name, char c, const char* p, void (*f)(), const char* desc);
-  
-  
-  
-  
-  
   int   hasarg(int i) { return strlen(opts[i].optname)?1:0; }
   void  printhelp(std::ostream& os);
   void  printman(std::ostream& os);

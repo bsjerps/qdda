@@ -30,7 +30,8 @@
 #define string std::string
 
 extern bool g_abort;
-// Die with error message - severe errors (should not happen)
+
+// Die with error message
 void die(string errmsg,int rc) { 
   std::cerr << "Error: " << errmsg << " " << std::endl << std::flush;
   exit(rc);
@@ -63,13 +64,6 @@ int fileExists(const char * fn) {
   if(!f.fail()) return 1;
   return 0;
 }
-
-/*
-// File size in bytes
-std::ifstream::pos_type fileSize(const char* filename) {
-  std::ifstream in(filename, std::ifstream::ate | std::ifstream::binary);
-  return in.tellg(); 
-}*/
 
 off_t fileSize(const char *filename) {
   struct stat st; 
@@ -186,21 +180,6 @@ int cpuCount() {
 /*******************************************************************************
  * LongOptions class functions
  ******************************************************************************/
-/*
- void  add(const char* name, char val, const char* par, bool& b,     const char* desc);
-  void  add(const char* name, char val, const char* par, int& p,      const char* desc);
-  void  add(const char* name, char val, const char* par, ulong& p,    const char* desc);
-  void  add(const char* name, char val, const char* par, string& str, const char* desc);
-  void  add(const char* name, char val, const char* par, void (*f)(), const char* desc);
-  * 
-  * 
-  void  add(const char* name, char c, const char* p, bool&   v,   const char* desc);
-  void  add(const char* name, char c, const char* p, int&    v,   const char* desc);
-  void  add(const char* name, char c, const char* p, ulong&  v,   const char* desc);
-  void  add(const char* name, char c, const char* p, string& v,   const char* desc);
-  void  add(const char* name, char c, const char* p, void (*f)(), const char* desc);
-  
-  */
   
 void LongOptions::add(const char* name, char c, const char* p, bool&  v, const char* desc) {
   opts.push_back( (Option) { name, c?c:++val, p, desc } );

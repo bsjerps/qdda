@@ -1,6 +1,6 @@
 /*******************************************************************************
  * Title       : helptext.cpp
- * Description : C++ manual text definitions for qdda
+ * Description : C++ manpage and help text definitions for qdda
  * Author      : Bart Sjerps <bart@outrun.nl>
  * License     : GPLv3+
  * Disclaimer  : See https://www.gnu.org/licenses/gpl-3.0.txt
@@ -106,12 +106,14 @@ capacity used divided by total
 .B Storage capacity
 .P
 During scans, data is stored in a SQLite staging database table with 2 columns (hash and bytes).
-The hash is usually a large integer requiring 8 bytes, bytes is another int which is usually between 1 and 2 bytes (sometimes 3 when
-using block sizes larger than 64K).
+The hash is usually a large integer requiring 8 bytes, bytes is another int which is usually 2 bytes (sometimes 3 when
+using block sizes larger than 64K). The database also stores the rowid which is up to 4 bytes and a b-tree iternal index which usually
+gets about 7 bytes per row.
 .br
-For each row, SQLite keeps additional information (the rowid) which requires another 8 bytes. So the amount of bytes per block is
-roughly 8 + 8 + 2 = 18 bytes. Scanning a terabyte disk at 16K blocksize requires 67,108,864 rows. The database capacity required for
-the staging table is then 67108864 * 18 = 1,207,959,552 bytes = 1152 MiB (not including a little bit extra capacity for SQLite internals).
+So the amount of bytes per row equals b-tree(7) + rowid(4) + hash(8) + val (2) = 21
+.br
+Scanning a terabyte disk at 16K blocksize requires 67,108,864 rows. The database capacity required for
+the staging table is then 67108864 * 21 = 1,409,286,144 bytes = 1344 MiB (not including a little bit extra capacity for SQLite internals).
 .br
 So at 16K blocksize the database capacity for scanning is roughly 0.11% of the data size.
 .P

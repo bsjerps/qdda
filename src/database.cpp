@@ -30,19 +30,11 @@
 extern bool g_debug;
 extern bool g_query;
 extern bool g_abort;
-extern std::ofstream  c_debug;
-extern std::ofstream  c_query;
 extern const char* PROGVERSION;
-extern ulong          starttime;
+extern ulong       starttime;
 
-// std::shorthands
-
-// #define string std::string
-typedef std::string string;
-
-std::ostream& cout = std::cout;
-std::ostream& endl (std::ostream& os) { return std::endl(os) ; }
-
+// dirty hack to improve readability
+#define string std::string
 
 /*******************************************************************************
 * SQLite Schema definition:
@@ -79,7 +71,7 @@ int fileIsSqlite3(const char * fn) {
 int fileDeleteSqlite3(const char * fn) {
   if(!fileExists(fn))  return 1;
   if(!fileIsSqlite3(fn)) return 1;
-  c_debug << "Deleting file " << fn << std::endl;
+  if(g_debug) std::cerr << "Deleting file " << fn << std::endl;
   if (unlink(fn)) err(1, "%s", fn);
   return 0;
 }
@@ -109,26 +101,31 @@ string parseFileName(const string& in) {
  * Query class functions
  ******************************************************************************/
 
-Query::Query(sqlite3* db, const char * q) { prep(db,q); }
-Query::~Query()          { finalize(); }
-const char* Query::sql() { return sqlite3_sql(pStmt); }
-
-// prepare the statement
-int Query::prep(sqlite3 *db, const char * query) {
+Query::Query(sqlite3* db, const char* query) {
   ref = 0; // reset parameter count
-  if(!db) return 0;
+  if(!db) die("sqlite3 not initialized");
   const char * pzTest;
   int rc=sqlite3_prepare_v2(db, query, strlen(query), &pStmt, &pzTest);
-  if(rc==SQLITE_OK) return 0;
-  cout << "MySQL prepare, query: " << query << endl;
+  if(rc==SQLITE_OK) return;
+  errstream << "MySQL prepare, query: " << query;
   die(sqlite3_errmsg(db));
-  return rc; // we never get here
 }
+
+void Query::printerr(const string& str) { 
+  errstream << str << std::endl;
+}
+
+Query::~Query()               { 
+  // std::cerr << "closing: " << sql() << "\n" << std::flush;
+  sqlite3_finalize(pStmt);
+}
+const char* Query::sql()      { return sqlite3_sql(pStmt); }
+Query::operator const ulong() { return execl(); }
 
 int Query::bind(const ulong p) { 
   int rc = sqlite3_bind_int64(pStmt, ++ref, p);
   if(rc==SQLITE_OK) return 0;
-  cout << "MySQL bind ulong, return code: " << rc << ", query = " << sql() << endl;
+  errstream << "MySQL bind ulong, return code: " << rc << ", query = " << sql() << "\n";
   die(sqlite3_errmsg(sqlite3_db_handle(pStmt)));
   return rc; // we never get here
 };
@@ -136,7 +133,7 @@ int Query::bind(const ulong p) {
 int Query::bind(const char* p) {
   int rc = sqlite3_bind_text (pStmt, ++ref, p, strlen(p),SQLITE_STATIC);
   if(rc==SQLITE_OK) return 0;
-  cout << "MySQL bind string, return code: " << rc << endl;
+  errstream << "MySQL bind string, return code: " << rc << "\n";
   die(sqlite3_errmsg(sqlite3_db_handle(pStmt)));
   return rc; // we never get here
 };
@@ -145,21 +142,21 @@ int Query::bind(const string& p) { return bind(p.c_str()); };
 
 int Query::step() {
   if(!pStmt) die("Query statement not prepared");
-  if(g_query) print(std::cout);
+  //if(g_query) print(cout);
   int rc = sqlite3_step(pStmt);
   if(rc==SQLITE_DONE) return 0;
   if(rc==SQLITE_ROW) return 0;
-  cout << "MySQL step, return code: " << rc << endl;
+  errstream << "MySQL step, return code: " << rc << "\n";
   die(sqlite3_errmsg(sqlite3_db_handle(pStmt)));
   return rc; // we never get here
 }
 
 int Query::reset() {
-  if(g_query) std::cout << std::endl << std::flush;
+  if(g_query) std::cout << "\n" << std::flush;
   ref=0;
   int rc = sqlite3_reset(pStmt);
   if(rc==SQLITE_OK) return 0;
-  cout << "MySQL reset, return code: " << rc << endl;
+  errstream << "MySQL reset, return code: " << rc << "\n";
   die(sqlite3_errmsg(sqlite3_db_handle(pStmt)));
 }
 
@@ -174,23 +171,16 @@ ulong Query::execl() {
   step();
   ulong retval = sqlite3_column_int64(pStmt, 0);
   if(g_query) std::cout << " = " << retval;
-  // handle multiple rows returned (SQLITE_DONE)
+  // handle multiple rows returned (SQLITE_DONE) ?
   reset();
   return retval;
 }
 
-ulong Query::execl(ulong p1) {
-  bind(p1);
-  return execl();
-}
-ulong Query::execl(ulong p1, ulong p2) {
-  bind(p1);bind(p2);
-  return execl();
-}
-
+ulong Query::execl(ulong p1)           { bind(p1); return execl(); }
+ulong Query::execl(ulong p1, ulong p2) { bind(p1);bind(p2); return execl(); }
 
 // execute prepared statement, return string
-const string Query::exectext() {
+const string Query::str() {
   string retval;
   const unsigned char * pText = NULL;
   step();
@@ -201,13 +191,7 @@ const string Query::exectext() {
   return retval;
 }
 
-// cleanup
-void Query::finalize() {
-  sqlite3_finalize(pStmt);
-  pStmt = NULL;
-}
-
-void Query::report(const string& tabstr) {
+void Query::report(std::ostream& os, const string& tabstr) {
   char separator = ' ';
   std::vector<int>  tabs;
   int               rc = 0;  
@@ -218,36 +202,36 @@ void Query::report(const string& tabstr) {
     getline(ss,str,',');
     tabs.push_back(atoi(str.c_str()));
   }
-  if(g_query) { print(std::cout); cout << endl; }
+  if(g_query) { print(std::cout); std::cout << std::endl; }
   int cols = sqlite3_column_count(pStmt);
   for(int i=0;i<cols; i++) {
-    if(tabs[i]>0) cout << std::left;
-    else cout << std::right;
-    if(i<tabs.size()) cout << std::setw(abs(tabs[i]));
-    cout << sqlite3_column_name(pStmt,i);
-    if(i<cols-1) cout << separator;
+    if(tabs[i]>0) std::cout << std::left;
+    else os << std::right;
+    if(i<tabs.size()) os << std::setw(abs(tabs[i]));
+    os << sqlite3_column_name(pStmt,i);
+    if(i<cols-1) os << separator;
   }
-  cout << endl;
+  os << "\n";
 
   rc=sqlite3_step(pStmt);
   while(rc==SQLITE_ROW) {
     for(int i=0;i<cols;i++) {
-      if(tabs[i]>0) cout << std::left;
-      else cout << std::right;
+      if(tabs[i]>0) os << std::left;
+      else os << std::right;
       int coltype = sqlite3_column_type(pStmt,i);
-      if(i<tabs.size()) cout << std::setw(abs(tabs[i]));
-      cout << std::setprecision(2) << std::fixed;
+      if(i<tabs.size()) os << std::setw(abs(tabs[i]));
+      os << std::setprecision(2) << std::fixed;
       switch(coltype) {
-        case SQLITE_INTEGER: cout << sqlite3_column_int64(pStmt,i) ; break;
-        case SQLITE_TEXT:    cout << sqlite3_column_text(pStmt,i) ; break;
-        case SQLITE_FLOAT:   cout << sqlite3_column_double(pStmt,i); break;
-        case SQLITE_BLOB:    cout << "<blob>" ; break;
-        case SQLITE_NULL:    cout << "-" ; break;
-        default:             cout << "?" ; break;
+        case SQLITE_INTEGER: os << sqlite3_column_int64(pStmt,i) ; break;
+        case SQLITE_TEXT:    os << sqlite3_column_text(pStmt,i) ; break;
+        case SQLITE_FLOAT:   os << sqlite3_column_double(pStmt,i); break;
+        case SQLITE_BLOB:    os << "<blob>" ; break;
+        case SQLITE_NULL:    os << "-" ; break;
+        default:             os << "?" ; break;
       }
-      if(i<cols-1) cout << separator; 
+      if(i<cols-1) os << separator; 
     }
-    cout << endl;
+    os << "\n";
     rc=sqlite3_step(pStmt);
   }
   sqlite3_reset(pStmt);
@@ -255,11 +239,6 @@ void Query::report(const string& tabstr) {
 
 void Query::print(std::ostream& os) {
   os << sqlite3_expanded_sql(pStmt);
-}
-
-std::ostream& operator<<(std::ostream& stream, Query& statement) {
-  stream << "query=" << statement.sql() << std::flush;
-  return stream;
 }
 
 /*******************************************************************************
@@ -275,7 +254,9 @@ Database::Database(const string& fn) {
     die(errmsg.str());
   }
   sql("select count(*) from sqlite_master");
-  c_debug << "DB opened: " << fn << endl;  
+  if(g_debug) std::cerr << "DB opened: " << fn << std::endl;  
+  pq_begin = new Query(db,"begin transaction");
+  pq_end   = new Query(db,"end transaction");
 }
 
 int Database::createdb(const string& fn, const char* schema) {
@@ -305,12 +286,30 @@ int Database::createdb(const string& fn, const char* schema) {
 }
 
 // detach tempdb and finalize all statements before closing db
-Database::~Database()   { close(); }
+Database::~Database()   { delete pq_begin; delete pq_end; close(); }
+void Database::begin()  { pq_begin->exec(); }
+void Database::end()    { pq_end->exec(); }
+
+int Database::attach(const string& schema, const string& fname) {
+  Query q(db, "attach database ? as ?");
+  q.bind(fname);
+  q.bind(schema);
+  q.exec();
+  return 0;
+}
+
+int Database::detach(const string& schema) {
+  Query q(db, "detach database ?");
+  q.bind(schema);
+  q.exec();
+  return 0;
+}  
+
 void Database::vacuum() { sql("vacuum"); }
 
 int Database::close() {
   int rc;
-  c_debug << "Closing DB " << filename() << std::endl;
+  if(g_debug) std::cerr << "Closing DB " << filename() << std::endl;
   if(db) rc=sqlite3_close(db);
   db=NULL;
   return rc;
@@ -356,9 +355,6 @@ int Database::unlinkdb() {
 
 // Run SQL statement, ignore results (update/insert)
 void Database::sql(const string& query) {
-  //Stopwatch stopwatch;
-  //showquery(query);
-  // c_query << query;
   int rc=0;
   char * errmsg;
   rc = sqlite3_exec(db, query.c_str(), 0, 0, &errmsg);
@@ -366,8 +362,6 @@ void Database::sql(const string& query) {
     std::cerr << "SQL error: " << errmsg << ", SQL: " << query << std::endl;
     die("Cannot execute SQL");
   }
-  //stopwatch.lap();
-  //c_query << ", " << stopwatch.runtime() << std::endl;
 }
 
 /*******************************************************************************
@@ -383,22 +377,18 @@ CREATE TABLE IF NOT EXISTS metadata(lock char(1) not null default 1
 , compression text
 ,constraint pk_t1 primary key(lock), constraint ck_t1_l check (lock=1));
 CREATE TABLE IF NOT EXISTS files(id integer primary key autoincrement, name TEXT, hostname TEXT, timestamp integer, blocks integer, bytes integer);
-CREATE TABLE IF NOT EXISTS staging(id integer primary key autoincrement default 0,hash integer, bytes integer);
-CREATE TABLE IF NOT EXISTS testdata(k integer, b integer);
+CREATE TABLE IF NOT EXISTS staging(id integer primary key autoincrement, hash integer, bytes integer);
 )");
   StagingDB newdb(fn);
-  newdb.setblocksize(blocksize);
+  newdb.setblocksize.execl(blocksize);
 }
 
 StagingDB::StagingDB(const string& fn): Database(fn),
-  q_begin       (db,"begin transaction"),
-  q_end         (db,"end transaction"),
-  q_setblocksize(db,"insert into metadata (blksz,compression) values (?,'lz4')"),
-  q_getblocksize(db,"select blksz from metadata"),
-  q_getrows     (db,"select count(*) from staging"),
+  setblocksize  (db,"insert into metadata (blksz,compression) values (?,'lz4')"),
+  blocksize     (db,"select blksz from metadata"),
+  rows          (db,"select count(*) from staging"),
   q_insert      (db,"insert into staging(hash,bytes) values (?,?)"),
   q_meta        (db,"insert into files (name,blocks,hostname,timestamp,bytes) values (?,?,?,?,?)"),
-
   q_fillrand    (db,R"(
 with recursive 
 rnd(k,b) AS (
@@ -418,27 +408,22 @@ SELECT 0, 0 FROM rnd LIMIT ?1
 )")
 {
   sql("PRAGMA schema_version");      // trigger error if not open
-  sql("PRAGMA journal_mode = off");
-  sql("PRAGMA synchronous = off");
+  sql("PRAGMA journal_mode = off");  // speed up, don't care about consistency
+  sql("PRAGMA synchronous = off");   // same
   /*
   sql("PRAGMA cache_spill = off");
   sql("PRAGMA cache_size = 10000");
   sql("PRAGMA locking_mode = EXCLUSIVE");
   */
-  // mmap_size limits the amount of linux memory cache slots, this avoids slowing down large scans
+  // mmap_size limits the amount of linux memory cache slots, 
+  // this avoids slowing down large scans
   sql("PRAGMA mmap_size = 65536");
 }
 
 StagingDB::~StagingDB()  { }
-void StagingDB::begin()  { q_begin.exec(); }
-void StagingDB::end()    { q_end.exec(); }
-
-ulong StagingDB::getblocksize() { return q_getblocksize.execl(); }
-ulong StagingDB::getrows()      { return q_getrows.execl(); }
-void StagingDB::setblocksize(ulong b) { q_setblocksize.bind(b); q_setblocksize.exec(); }
 
 // insert hash, compressed bytes into staging
-void StagingDB::insertkv(ulong hash, ulong bytes) {
+void StagingDB::insertdata(ulong hash, ulong bytes) {
   q_insert.bind(hash);
   q_insert.bind(bytes);
   q_insert.exec();
@@ -477,53 +462,31 @@ int StagingDB::savemeta(string name, ulong blocks, ulong bytes) {
  ******************************************************************************/
 
 QddaDB::QddaDB(const string& fn): Database(fn),
-  q_getblocksize         (db,"select blksz from metadata"),
-  q_getrows              (db,"select count(*) from kv"),
-  q_getallocated         (db,"select sum(blocks) from v_compressed"),
-  q_getarrayid           (db,"select arrayid from metadata"),
-  q_getzero              (db,"select blocks from kv where hash=0"),
-  q_gettotal             (db,"select sum(blocks) from kv"),
-  q_getused              (db,"select sum(ref*count) from m_sums_deduped"),
-  q_getnuniq             (db,"select sum(ref*count) from m_sums_deduped where ref>1"),
-  q_getunique            (db,"select count from m_sums_deduped where ref=1"),
-  q_getdeduped           (db,"select sum(count) from m_sums_deduped"),
-  q_getbytescompressedraw(db,"select sum(raw) from m_sums_compressed"),
-  q_getbytescompressednet(db,"select sum(bytes) from m_sums_compressed"),
-  q_loadbuckets          (db,"insert or replace into buckets values (?)"),
-  q_truncbuckets         (db,"delete from buckets"),
-  q_listfiles            (db,"select * from v_files"),
-  q_attach               (db,"attach database ? as ?"),
-  q_detach               (db,"detach database ?"),
-  q_trunc_sums_compr     (db,"delete from m_sums_compressed"),
-  q_trunc_sums_deduped   (db,"delete from m_sums_deduped"),
-  q_update_sums_compr    (db,"insert into m_sums_compressed select * from v_sums_compressed"),
-  q_update_sums_deduped  (db,"insert into m_sums_deduped select * from v_sums_deduped"),
-  q_hist_compress(db,"select * from v_compressed union all "
+  hasmeta               (db,"select count(*) from metadata"),
+  blocksize             (db,"select blksz from metadata"),
+  arrayid               (db,"select arrayid from metadata"),
+  allocatedblocks       (db,"select sum(blocks) from v_compressed"),
+  zeroblocks            (db,"select blocks from kv where hash=0"),
+  totalblocks           (db,"select sum(blocks) from kv"),
+  uniqueblocks          (db,"select count from m_sums_deduped where ref=1"),
+  nonuniqblocks         (db,"select sum(ref*count) from m_sums_deduped where ref>1"),
+  dedupedblocks         (db,"select sum(count) from m_sums_deduped"),
+  bytescompressedraw    (db,"select sum(raw) from m_sums_compressed"),
+  bytescompressednet    (db,"select sum(bytes) from m_sums_compressed"),
+  usedblocks            (db,"select sum(ref*count) from m_sums_deduped"),
+  rows                  (db,"select count(*) from kv"),
+  compresshistogram(db,"select * from v_compressed union all "
                      "select 'Total:', sum(buckets), sum(blocks),sum(MiB) from v_compressed"),
-  q_hist_dedupe(db,"select * from v_deduped union all \n"
-                   "select 'Total:',sum(blocks),sum(bytes),sum(MiB) from v_deduped")
+  dedupehistogram(db,"select * from v_deduped union all \n"
+                   "select 'Total:',sum(blocks),sum(bytes),sum(MiB) from v_deduped"),
+  q_loadbuckets         (db,"insert or replace into buckets values (?)"),
+  q_truncbuckets        (db,"delete from buckets"),
+  filelist              (db,"select * from v_files")
 {
   sql("PRAGMA schema_version");      // trigger error if not open
   sql("PRAGMA temp_store_directory = '" + tmpdir + "'");
   // sql("PRAGMA temp_store = 2"); // use memory for temp tables
 }
-
-// wrapper functions for prefab queries
-ulong QddaDB::getblocksize()                      { return q_getblocksize.execl();  }  // blocksize from database
-ulong QddaDB::getrows()                           { return q_getrows.execl(); }        // rows in kv table
-ulong QddaDB::getallocated()                      { return q_getallocated.execl(); }  // blocks required after compress
-ulong QddaDB::getzero()                           { return q_getzero.execl(); };
-ulong QddaDB::gettotal()                          { return q_gettotal.execl(); };
-ulong QddaDB::getunique()                         { return q_getunique.execl(); };
-ulong QddaDB::getnuniq()                          { return q_getnuniq.execl(); };
-ulong QddaDB::getdeduped()                        { return q_getdeduped.execl(); };
-ulong QddaDB::getbytescompressedraw()             { return q_getbytescompressedraw.execl(); };
-ulong QddaDB::getbytescompressednet()             { return q_getbytescompressednet.execl(); };
-ulong QddaDB::getused()                           { return q_getused.execl(); };
-void  QddaDB::report_files(const string& tabs)    { q_listfiles.report(tabs); };
-void  QddaDB::report_dedupe(const string& tabs)   { q_hist_dedupe.report(tabs); };
-void  QddaDB::report_compress(const string& tabs) { q_hist_compress.report(tabs); };
-const string QddaDB::getarrayid() { return q_getarrayid.exectext(); }
 
 void QddaDB::createdb(const string& fn) {
   Database::createdb(fn,R"(
@@ -573,32 +536,27 @@ select (select max(bucksz) from buckets) blksz
 from m_sums_compressed group by 2;
 
 CREATE VIEW IF NOT EXISTS v_compressed as 
-select size
+WITH temp(size, blksz, buckets, blocks) as (select size
+, blksz
 , sum buckets
--- , size*sum bucket_kb
 , (size*sum+blksz-1)/blksz blocks
-, cast((((size*sum+blksz-1)/blksz)*blksz+1023)/1024 as float) MiB
-from v_bucket_compressed;
+from v_bucket_compressed)
+select size, buckets, blocks, blocks*blksz/1024.0 MiB from temp;
 
-CREATE VIEW IF NOT EXISTS v_deduped as
+CREATE VIEW IF NOT EXISTS v_deduped as 
+WITH blksz(bytes) as (select blksz*1024 from metadata)
 select 0 dup
 , blocks
-, (select blksz from metadata)*blocks*1024 bytes
-, cast((select blksz from metadata)*blocks/1024 as real) MiB
-from kv where hash=0 union all
+, blksz.bytes*blocks bytes
+, blksz.bytes*blocks/1048576.0 MiB
+from kv,blksz where hash=0 union all
 select ref
 , count*ref blocks
-, (select blksz from metadata)*ref*count*1024 bytes
-, cast((select blksz from metadata)*ref*count/1024 as real) MiB
-from m_sums_deduped
-)");
+, blksz.bytes*ref*count bytes
+, blksz.bytes*ref*count/1048576.0 MiB
+from m_sums_deduped,blksz;
 
-/* test stuff
-INSERT INTO BUCKETS VALUES (2),(4),(8);
-INSERT INTO KV VALUES (1,2,3);
-INSERT INTO KV VALUES (4,5,3000);
-INSERT INTO KV VALUES (5,5,5000);
-*/
+)");
 
 }
 
@@ -611,11 +569,11 @@ INSERT INTO KV VALUES (5,5,5000);
  * Other methods can be loaded manually into the database after creating the DB
  ******************************************************************************/
 
-void QddaDB::setmetadata(int blocksize, const string& compr, const string& name, const string& buckets) {
-  if(blocksize>128) die("Blocksize too large");
+void QddaDB::setmetadata(int blocksz, const string& compr, const string& name, const string& buckets) {
+  if(blocksz>128) die("Blocksize too large");
   Query q_meta(db,"insert into metadata (version, blksz, compression, arrayid, created) values (?,?,?,?,?)");
   q_meta.bind(PROGVERSION);  
-  q_meta.bind(blocksize);
+  q_meta.bind(blocksz);
   q_meta.bind(compr);
   q_meta.bind(name);
   q_meta.bind(epoch());
@@ -624,22 +582,23 @@ void QddaDB::setmetadata(int blocksize, const string& compr, const string& name,
 }
 
 void QddaDB::parsemetadata(string pr) {
-  if(getblocksize()) return;
+  if(blocksize) return;
+  if     (pr == "l" || pr == "list") { std::cout << "List requested" << std::endl ; return; }
   if     (pr == "x1")    setmetadata(  8, "lz4", "XtremIO X1", "2+4+8");
   else if(pr == "x2")    setmetadata( 16, "lz4", "XtremIO X2", "1+2+3+4+5+6+7+8+9+10+11+12+13+15+16");
   else if(pr == "vmax1") setmetadata(128, "lz4", "VMAX v1",    "8+16+24+32.40+48+56+64+72+80+88+96+104+112+120+128");
   else {
     string buckets, str;
     string name = "custom";
-    int    blocksize = 16;
+    int    newblocksize = 16;
     std::stringstream ss(pr);
     while(ss.good()) {
       getline(ss,str,',');
       if(str.substr(0,5) == "name=")    name=str.substr(5);
-      if(str.substr(0,3) == "bs=")      blocksize=atoll(str.substr(3).c_str());
+      if(str.substr(0,3) == "bs=")      newblocksize=atoll(str.substr(3).c_str());
       if(str.substr(0,8) == "buckets=") buckets=str.substr(8);
     }
-    setmetadata(blocksize, "lz4", name, buckets);
+    setmetadata(newblocksize, "lz4", name, buckets);
   }
 }
 
@@ -654,7 +613,7 @@ void QddaDB::loadbuckets(const string& s) {
     q_loadbuckets.bind(atoll(str.c_str()));
     q_loadbuckets.execl();
   }
-  q_loadbuckets.bind(getblocksize());
+  q_loadbuckets.bind((int)blocksize);
   q_loadbuckets.execl();
 }
 
@@ -668,9 +627,7 @@ group by tmpdb.staging.k
 
 // merge staging data into main table (performance optimized)
 void  QddaDB::merge(const string& name) {
-  q_attach.bind(name);
-  q_attach.bind("tmpdb");
-  q_attach.exec();
+  attach("tmpdb", name);
   Query q_merge(db,"with t(hash,blocks,bytes) as ("
                    "select hash,blocks,bytes from kv union all "
                    "select hash,1,bytes from tmpdb.staging"
@@ -680,29 +637,29 @@ void  QddaDB::merge(const string& name) {
                    "select name,hostname,timestamp,blocks,bytes from tmpdb.files");
   q_merge.exec();
   q_copy.exec();
-  q_trunc_sums_compr.exec();
-  q_trunc_sums_deduped.exec();
-  q_update_sums_compr.exec();
-  q_update_sums_deduped.exec();
-} 
+  detach("tmpdb");
+  update();
+}
 
+void QddaDB::update() {
+  sql("delete from m_sums_compressed;\n"
+      "delete from m_sums_deduped;\n"
+      "insert into m_sums_compressed select * from v_sums_compressed;\n"
+      "insert into m_sums_deduped select * from v_sums_deduped;\n");
+}
+      
 void QddaDB::import(const string& fn) {
-  q_attach.bind(fn);
-  q_attach.bind("impdb");
-  q_attach.exec();
-  Query q_import(db,"insert or replace into main.kv \n"
-                    "select impdb.kv.hash \n"
-                    ", coalesce(main.kv.blocks,0) + impdb.kv.blocks\n"
-                    ", impdb.kv.bytes from impdb.kv\n"
-                    "left outer join main.kv on main.kv.hash = impdb.kv.hash\n"
-                    "group by impdb.kv.hash\n"
-                    "order by main.kv.hash,impdb.kv.hash\n");
-  q_import.exec();
-  q_trunc_sums_compr.exec();
-  q_trunc_sums_deduped.exec();
-  q_update_sums_compr.exec();
-  q_update_sums_deduped.exec();
+  attach("impdb", fn);
+  sql("insert or replace into main.kv \n"
+      "select impdb.kv.hash \n"
+      ", coalesce(main.kv.blocks,0) + impdb.kv.blocks\n"
+      ", impdb.kv.bytes from impdb.kv\n"
+      "left outer join main.kv on main.kv.hash = impdb.kv.hash\n"
+      "group by impdb.kv.hash\n"
+      "order by main.kv.hash,impdb.kv.hash\n");
   sql("insert into files(name, hostname, timestamp, blocks, bytes) "
       "select name, hostname, timestamp, blocks, bytes from impdb.files");
+  update();
+  detach("impdb");
 }
 

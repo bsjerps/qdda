@@ -7,13 +7,17 @@
  * URL         : http://outrun.nl/wiki/qdda
  ******************************************************************************/
 
-//#include <fstream>
+#pragma once
+
 #include <vector>
 #include "database.h"
 
-#pragma once
-
+// dirty hack to improve readability
 #define string std::string
+
+class FileData;
+
+typedef std::vector<FileData> v_FileData;
 
 /*******************************************************************************
  * functions
@@ -23,19 +27,30 @@ class Filelist;
 class Parameters;
 
 ulong hash_md5(const char* src, char* zerobuf, const int size);
-void  report(QddaDB& db);
-void  reportHistograms(QddaDB& db);
 u_int compress(const char * src,char * buf, const int size);
+
+//void analyze(Filelist& filelist, QddaDB& db, Parameters& parameters);
+void analyze(v_FileData& filelist, QddaDB& db, Parameters& parameters);
+
+void report(QddaDB& db);
+void reportDetail(QddaDB& db);
+
+// show repeating progress line
 void  progress(ulong blocks,ulong blocksize, ulong bytes, const char * msg = NULL);
-void  analyze(Filelist& filelist, QddaDB& db, Parameters& parameters);
 
 /*******************************************************************************
  * structs & classes
  ******************************************************************************/
 
-// Valid menu actions
-//struct Parameters;
+class FileData {
+public:
+  FileData(const string& name);
+  std::ifstream* ifs;
+  string filename;
+  int limit_mb;
+};
 
+/*
 // Vectored list of open streams (files)
 class Filelist {
 public:
@@ -44,16 +59,17 @@ public:
   int            size();
   ulong          getBytes(int i);
   ulong          getBlocks(int i);
-  const string& name(int i);
+  const string&  name(int i);
   void           open(const char *);
 private:
   std::vector <std::ifstream *> ifs;
   std::vector <string> filename;
-};
-
+  std::vector <int> limit_mb;
+};*/
 
 // Parameter set to pass between functions
 struct Parameters {
+  string dbname;
   string tmpdir;
   string array;
   string import;
@@ -65,8 +81,8 @@ struct Parameters {
   bool do_help;
   bool do_mandump;
   bool do_cputest;
-  // bool do_dbtest;
   bool do_purge;
+  bool do_create;
   bool do_delete;
   bool queries;
   bool skip;

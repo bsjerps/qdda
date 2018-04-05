@@ -7,10 +7,12 @@
  * URL         : http://outrun.nl/wiki/qdda
  ******************************************************************************/
 
+#pragma once
 #include <vector>
 
 long threadpid();
 
+// simple Mutex class
 class Mutex {
 public:
   Mutex()       { pthread_mutex_init(&mutex,0); }
@@ -26,7 +28,7 @@ private:
 // to be processed by the worker
 class DataBuffer {
 public:
-  DataBuffer(ulong);
+  DataBuffer(ulong, ulong);
  ~DataBuffer();
   int   trylock();
   void  unlock();
@@ -36,18 +38,18 @@ public:
   ulong blocks;            // blocks read
   ulong bytes;             // bytes read
   char* readbuf;           // the actual data
-  char* operator[](int n); // access to the nth buffer
+  char* operator[](int n); // access to the nth block in the buffer
 private:
   ulong blocksize_kb;
   Mutex mutex;
 };
-
 
 // IOThrottle holds shared data to provide IO bandwidth throttling
 class IOThrottle {
 public:
   IOThrottle(ulong mibps);  // Initialize with megabytes per sec value
   void request(ulong kb);   // request to read a number of 1k blocks
+private:
   ulong mibps;              // the bandwidth
   Stopwatch stopwatch;      // track time between requests
   Mutex mutex;

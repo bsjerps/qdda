@@ -26,7 +26,7 @@
  * 1.8.2 - Bugfixes, updated reporting & documentation
  * 1.9.0 - Added 128K compression support, split primary and staging DB, 
  *         code cleanup, minor bugfixes, experimental VMAX compression
- * 2.0.0 - Multithreading
+ * 2.0.0 - Multithreading and rewrite
  * ---------------------------------------------------------------------------
  * Build notes: Requires lz4 >= 1.7.1
  ******************************************************************************/
@@ -60,15 +60,9 @@ using namespace std;
  * global parameters - modify at own discretion
  ******************************************************************************/
 
-const char* PROGVERSION   = "1.9.2" RELEASE;
+const char* PROGVERSION   = "2.0.0" RELEASE;
 const char* DEFAULT_TMP    = "/var/tmp"; // tmpdir for SQLite temp files
 const ulong DEFAULT_BANDWIDTH = 200;     //
-
-/*******************************************************************************
- * Constants - don't touch
- ******************************************************************************/
-
-const ulong MEBIBYTE          = 1048576; // Bytes per MiB
 
 /*******************************************************************************
  * Initialization - globals
@@ -78,33 +72,24 @@ bool g_debug = false; // global debug flag
 bool g_query = false; // global query flag
 bool g_quiet = false; // global quiet flag
 bool g_abort = false; // global signal flag - true if ctrl-c was pressed (sigterm)
+ulong    starttime = epoch();  // start time of program
 
-ofstream c_debug;                             // Debug stream, open with -D option
-ulong    starttime = epoch();                 // start time of program
+ofstream c_debug; // Debug stream
 
-int Filelist::size() {   return ifs.size(); }
-
-ifstream& Filelist::operator[](uint i) {
-  if(i>size()) die("File index error");
-  return *ifs[i];
-};
-
-const string& Filelist::name(int i) {
-  if(i>size()) die("File index error");
-  return filename[i];
-}
-
-Filelist::~Filelist() {
-  for(int i = 0; i<size() ; i++)
-    delete ifs[i];
-}
-
-void Filelist::open(const char * file) {
-  ifs.push_back(new ifstream);
-  filename.push_back(file);
+FileData::FileData(const string& file) {
+  std::stringstream ss(file);
+  string fname;
+  string sizestr;
+  int maxsize = 0;
+  getline(ss,fname,':');
+  getline(ss,sizestr);
+  if(!sizestr.empty()) maxsize=atoi(sizestr.c_str());
+  ifs = new ifstream;
+  filename = fname;
+  limit_mb = maxsize;
   c_debug << "Opening: " << file << endl;
-  ifs.back()->open(file);
-  if (!ifs.back()->is_open()) {
+  ifs->open(fname);
+  if (!ifs->is_open()) {
     string msg = "File open failed, try:\nsudo setfacl -m u:";
     msg += getenv ("USER");
     msg += ":r ";
@@ -119,16 +104,15 @@ void Filelist::open(const char * file) {
  ******************************************************************************/
 
 const char * version_info  = 
-	"Copyright (C) 2017 Bart Sjerps <bart@outrun.nl>\n"
-	"License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
-	"This is free software: you are free to change and redistribute it.\n"
-	"There is NO WARRANTY, to the extent permitted by law.\n\n"
-	"build date: " __DATE__  "\nbuild time: " __TIME__ "\n";
+  "Copyright (C) 2018 Bart Sjerps <bart@outrun.nl>\n"
+  "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
+  "This is free software: you are free to change and redistribute it.\n"
+  "There is NO WARRANTY, to the extent permitted by law.\n\n"
+  "build date: " __DATE__  "\nbuild time: " __TIME__ "\n";
 
 
-const char * title_info = 
-	" - The Quick & Dirty Dedupe Analyzer\n"
-	"Use for educational purposes only - actual array reduction results may vary\n";
+const char * title_info = " - The Quick & Dirty Dedupe Analyzer\n"
+  "Use for educational purposes only - actual array reduction results may vary\n";
 
 extern const char* qdda_longhelp;
 extern const char* manpage_head;
@@ -232,10 +216,10 @@ void progress(ulong blocks,ulong blocksize, ulong bytes, const char * msg) {
   auto avgbw = safeDiv_ulong(bytes,avgsvctm);               // bytes per second since start of file
   auto curbw = safeDiv_ulong((bytes-prevbytes),cursvctm);   // bytes per second since previous call
   stringstream ss;                                          // generate a string with the progress message
-  ss << blocks         << " "                               // blocks scanned
-     << blocksize      << "k blocks ("                      // blocksize
-     << bytes/MEBIBYTE << " MiB) processed, "               // processed megabytes
-     << curbw << "/" << avgbw << " MB/s (cur/avg)";         // current/average bandwidth
+  ss << blocks        << " "                               // blocks scanned
+     << blocksize     << "k blocks ("                      // blocksize
+     << bytes/1048576 << " MiB) processed, "               // processed megabytes
+     << curbw << "/"  << avgbw << " MB/s (cur/avg)";         // current/average bandwidth
   if(msg) ss << msg;                                        // add message if specified
   ss << "                 " ;                               // blank rest of line
   showprogress(ss.str());
@@ -251,10 +235,10 @@ void progress(ulong blocks,ulong blocksize, ulong bytes, const char * msg) {
 void import(QddaDB& db, const string& filename) {
   if(!fileIsSqlite3(filename)) return;
   QddaDB idb(filename);
-  auto blocksize = db.getblocksize();
-  if(blocksize != idb.getblocksize()) die ("Incompatible blocksize");
+  ulong blocksize = db.blocksize;
+  if(blocksize != idb.blocksize) die ("Incompatible blocksize");
 
-  cout << "Adding " << idb.getrows() << " blocks from " << filename << " to " << db.getrows() << " existing blocks" << endl;
+  cout << "Adding " << idb.rows << " blocks from " << filename << " to " << db.rows << " existing blocks" << endl;
   db.import(filename);
 }
 
@@ -266,28 +250,32 @@ void merge(QddaDB& db, Parameters& parameters) {
   StagingDB sdb(tmpname);
 
   stringstream ss1,ss2;
-  auto blocksize     = db.getblocksize();
-  auto dbrows        = db.getrows();
-  auto tmprows       = sdb.getrows();
-  auto mib_staging   = tmprows*blocksize/1024;
-  auto mib_database  = dbrows*blocksize/1024;
-  auto fsize1        = db.filesize();
-  auto fsize2        = sdb.filesize();
+  ulong blocksize    = db.blocksize;
+  ulong dbrows       = db.rows;
+  ulong tmprows      = sdb.rows;
+  ulong mib_staging  = tmprows*blocksize/1024;
+  ulong mib_database = dbrows*blocksize/1024;
+  ulong fsize1       = db.filesize();
+  ulong fsize2       = sdb.filesize();
 
-  if(blocksize != sdb.getblocksize()) die ("Incompatible blocksize");
+  if(blocksize != sdb.blocksize) die ("Incompatible blocksize");
   
   sdb.close();
 
   Stopwatch stopwatch;
   if(tmprows) { // do nothing if merge db has no rows
-    if(!g_quiet) cout << "Merging " << tmprows << " blocks (" << mib_staging << " MiB) with " << dbrows << " blocks (" << mib_database << " MiB)"; // << endl;
-    showprogress(ss1.str());
+    if(!g_quiet) cout 
+      << "Merging " << tmprows << " blocks (" 
+      << mib_staging << " MiB) with " 
+      << dbrows << " blocks (" 
+      << mib_database << " MiB),\nJoining";
+
     stopwatch.reset();
     ulong index_rps = tmprows*1000000/stopwatch;
     ulong index_mbps = mib_staging*1000000/stopwatch;
-    // ss1 << " in " << stopwatch.seconds() << " sec (" << index_rps << " blocks/s, " << index_mbps << " MiB/s), ";
-    ss2 << ss1.str() << ", Joining" << flush;
-    showprogress(ss2.str());
+    
+//    ss2 << ss1.str() << ", Joining" << flush;
+//    showprogress(ss2.str());
 
     stopwatch.reset();
     db.merge(tmpname);
@@ -297,7 +285,10 @@ void merge(QddaDB& db, Parameters& parameters) {
     ulong merge_rps = (tmprows+dbrows)*1000000/time_merge;
     ulong merge_mbps = (mib_staging+mib_database)*1000000/time_merge;
     ss2 << " in " << stopwatch.seconds() << " sec (" << merge_rps << " blocks/s, " << merge_mbps << " MiB/s)";
-    if(!g_quiet) cout << ss2.str() << endl;
+    if(!g_quiet) cout 
+      << " in " << stopwatch.seconds() << " sec (" 
+      << merge_rps << " blocks/s, " 
+      << merge_mbps << " MiB/s)\n";
   }
   Database::deletedb(tmpname.c_str());
 }
@@ -308,10 +299,10 @@ void merge(QddaDB& db, Parameters& parameters) {
 // totalsize,zero=xx,dup1=xx
 void dbtest(QddaDB& db, Parameters& p) {
   string tmpname = p.tmpdir + "/qdda-staging.db";
-  StagingDB::createdb(tmpname,db.getblocksize());
+  StagingDB::createdb(tmpname,db.blocksize);
   StagingDB stagingdb(tmpname);
 
-  const ulong blocksize = db.getblocksize();
+  const ulong blocksize = db.blocksize;
   const ulong rowspergb = square(1024) / blocksize;
   
   ulong        rows = 0;  
@@ -354,14 +345,14 @@ void dbtest(QddaDB& db, Parameters& p) {
 void cputest(QddaDB& db) {
   
   const char* tmpname = "/var/tmp/staging-test.db";
-  StagingDB::createdb(tmpname,db.getblocksize());
+  StagingDB::createdb(tmpname,db.blocksize);
   StagingDB stagingdb(tmpname);
   
-  const ulong gb        = 1; // size of test set
-  const ulong blocksize = db.getblocksize();
+  const ulong mib       = 1024; // 1024; // size of test set
+  const ulong blocksize = db.blocksize;
 
-  const ulong rows      = gb * 1024 * MEBIBYTE / (blocksize*1024);
-  const ulong bufsize   = gb * 1024 * MEBIBYTE;
+  const ulong rows      = mib * 1024 / blocksize;
+  const ulong bufsize   = mib * 1024 * 1024;
   char*       testdata  = new char[bufsize];
   ulong time_hash, time_compress, time_insert, time_total=0;
   char buf[blocksize*1024];
@@ -374,31 +365,40 @@ void cputest(QddaDB& db) {
   srand(1);
   memset(testdata,0,bufsize);
   for(ulong i=0;i<bufsize;i++) testdata[i] = (char)rand() % 256; // fill test buffer with random data
-  cout << setw(15) << rows << " blocks, " << blocksize << "k (" << bufsize/MEBIBYTE << " MiB)" << endl;
+  cout << setw(15) << rows << " blocks, " << blocksize << "k (" << bufsize/1048576 << " MiB)" << endl;
 
   cout << "Hashing:     " << flush;
   stopwatch.reset();
   for(ulong i=0;i<rows;i++) hash_md5(testdata + i*blocksize*1024,buf,blocksize*1024);
   time_hash = stopwatch.lap(); time_total += time_hash;
   
-  cout << setw(15) << time_hash     << " usec, " << setw(10) << (float)bufsize/time_hash     << " MB/s" << endl;
+  cout << setw(15) << time_hash     << " usec, " 
+       << setw(10) << (float)bufsize/time_hash << " MB/s, " 
+       << setw(11) << float(rows)*1000000/time_hash << " rows/s"
+       << endl;
 
   cout << "Compressing: " << flush;
   stopwatch.reset();
   for(ulong i=0;i<rows;i++) compress(testdata + i*blocksize*1024,buf,blocksize*1024);
   time_compress = stopwatch.lap(); time_total += time_compress;
-  cout << setw(15) << time_compress << " usec, " << setw(10) << (float)bufsize/time_compress << " MB/s" << endl;
+  cout << setw(15) << time_compress << " usec, " 
+       << setw(10) << (float)bufsize/time_compress << " MB/s, " 
+       << setw(11) << float(rows)*1000000/time_compress << " rows/s"
+       << endl;
   
   // test sqlite insert performance
   cout << "DB insert:   " << flush;
   stopwatch.reset();
 
   stagingdb.begin();
-  for(ulong i=0;i<rows;i++) stagingdb.insertkv(i,blocksize);
+  for(ulong i=0;i<rows;i++) stagingdb.insertdata(i,blocksize);
   // for(ulong i=0;i<1000000;i++) stagingdb.insertkv(i,blocksize);
   stagingdb.end();
   time_insert = stopwatch.lap(); time_total += time_insert;
-  cout << setw(15) << time_insert   << " usec, " << setw(10) << (float)bufsize/time_insert   << " MB/s" << endl;
+  cout << setw(15) << time_insert << " usec, "
+       << setw(10) << (float)bufsize/time_insert   << " MB/s, "
+       << setw(11) << float(rows)*1000000/time_insert << " rows/s"
+       << endl;
 
   // time_total = time_hash + time_compress + time_insert;
   cout << "Total:       " << setw(15) << time_total    << " usec, " << setw(10) << (float)bufsize/time_total    << " MB/s" << endl;
@@ -406,15 +406,6 @@ void cputest(QddaDB& db) {
   Database::deletedb(tmpname);
 }
 
-/*
-// parse arg and call either speedtest (arg=0) or mergetest
-void perftest(QddaDB& db, Parameters& args, const string& p) {
-  if(p != "0") {
-    mergetest(db, args, p);
-  } else {
-    speedtest(db);
-  }
-}*/
 
 void manpage() {
   string cmd;
@@ -449,46 +440,46 @@ void mandump(LongOptions& lo) {
 
 int main(int argc, char** argv) {
   int rc = 0;
-
-  string     dbname    = defaultDbName(); // DEFAULT_DBNAME;
   Parameters parameters = {};
-  LongOptions opts;
-  Filelist   filelist;
-  
-  parameters.workers   = cpuCount(); // + 2;
-  parameters.readers   = 32;
-  parameters.bandwidth = DEFAULT_BANDWIDTH;
-  parameters.tmpdir    = DEFAULT_TMP;
-  parameters.array     = "x2";
+  Parameters& p = parameters; // shorthand  
+
+  v_FileData  filelist;
+
+  // set default values
+  p.dbname    = defaultDbName();
+  p.workers   = cpuCount();
+  p.readers   = 32;
+  p.bandwidth = DEFAULT_BANDWIDTH;
+  p.tmpdir    = DEFAULT_TMP;
+  p.array     = "x2";
   
 //  -B <blksize_kb>   : Set blocksize to blksize_kb kilobytes
-// --create ?
 
-  Parameters& p = parameters;
-
-  opts.add("version"  ,'V', ""           , showversion,  "show version and copyright info");
-  opts.add("help"     ,'h', ""           , p.do_help,    "show usage");
-  opts.add("man"      ,'m', ""           , manpage,      "show detailed manpage");
-  opts.add("db"       ,'d', "<file>"     , dbname,       "database file path (default $HOME/qdda.db)");
-  opts.add("quiet"    ,'q', ""           , g_quiet,      "Don't show progress indicator or intermediate results");
-  opts.add("bandwidth",'b', "<mb/s>"     , p.bandwidth,  "Throttle bandwidth in MB/s (default 200, 0=disable)");
-  opts.add("mandump"  , 0 , ""           , p.do_mandump, "dump manpage to stdout");
-  opts.add("workers"  , 0 , "<wthreads>" , p.workers,    "number of worker threads");
-  opts.add("readers"  , 0 , "<rthreads>" , p.readers,    "(max) number of reader threads");
-  opts.add("buffers"  , 0 , "<buffers>"  , p.buffers,    "number of buffers (debug only!)");
-  opts.add("dryrun"   ,'n', ""           , p.dryrun,     "skip staging db updates during scan");
-  opts.add("array"    , 0 , "<arrayid>"  , p.array,      "set array type/id"); // need list option
-  opts.add("purge"    , 0 , ""           , p.do_purge,   "Reclaim unused space in database (sqlite vacuum)");
-  opts.add("import"   , 0 , "<file>"     , p.import,     "import another database (must have compatible metadata)");
-  opts.add("cputest"  , 0 , ""           , p.do_cputest, "Single thread CPU performance test");
-  opts.add("dbtest"   , 0 , "<testpars>" , p.dbtestopts, "Database performance test");
-  opts.add("nomerge"  , 0 , ""           , p.skip,       "Skip staging data merge and reporting, keep staging database");
-  opts.add("debug"    , 0 , ""           , g_debug,      "Enable debug output");
-  opts.add("queries"  , 0 , ""           , g_query,      "Show SQLite queries and results"); // --show?
-  opts.add("tempdir"  , 0 , "<dir>"      , p.tmpdir,     "Set SQLite TEMPDIR (default /var/tmp");
-  opts.add("delete"   , 0 , ""           , p.do_delete,  "Delete database");
-  opts.add("append"   ,'a', ""           , p.append,     "Append data instead of deleting database");
-  opts.add("detail"   ,'x', ""           , p.detail,     "Detailed report (file info and dedupe/compression histograms)");
+  LongOptions opts;
+  opts.add("version"  ,'V', ""             , showversion,  "show version and copyright info");
+  opts.add("help"     ,'h', ""             , p.do_help,    "show usage");
+  opts.add("man"      ,'m', ""             , manpage,      "show detailed manpage");
+  opts.add("db"       ,'d', "<file>"       , p.dbname,     "database file path (default $HOME/qdda.db)");
+  opts.add("create"   , 0 , "<file>"       , p.do_create,  "Create new database");
+  opts.add("delete"   , 0 , ""             , p.do_delete,  "Delete database");
+  opts.add("quiet"    ,'q', ""             , g_quiet,      "Don't show progress indicator or intermediate results");
+  opts.add("bandwidth",'b', "<mb/s>"       , p.bandwidth,  "Throttle bandwidth in MB/s (default 200, 0=disable)");
+  opts.add("array"    , 0 , "<arraydef>"   , p.array,      "set array type/id or use custom definition"); // need list option
+  opts.add("append"   ,'a', ""             , p.append,     "Append data instead of deleting database");
+  opts.add("detail"   ,'x', ""             , p.detail,     "Detailed report (file info and dedupe/compression histograms)");
+  opts.add("dryrun"   ,'n', ""             , p.dryrun,     "skip staging db updates during scan");
+  opts.add("purge"    , 0 , ""             , p.do_purge,   "Reclaim unused space in database (sqlite vacuum)");
+  opts.add("import"   , 0 , "<file>"       , p.import,     "import another database (must have compatible metadata)");
+  opts.add("cputest"  , 0 , ""             , p.do_cputest, "Single thread CPU performance test");
+  opts.add("dbtest"   , 0 , "<testpars>"   , p.dbtestopts, "Database performance test");
+  opts.add("nomerge"  , 0 , ""             , p.skip,       "Skip staging data merge and reporting, keep staging database");
+  opts.add("debug"    , 0 , ""             , g_debug,      "Enable debug output");
+  opts.add("queries"  , 0 , ""             , g_query,      "Show SQLite queries and results"); // --show?
+  opts.add("tempdir"  , 0 , "<dir>"        , p.tmpdir,     "Set SQLite TEMPDIR (default /var/tmp");
+  opts.add("workers"  , 0 , "<wthreads>"   , p.workers,    "number of worker threads");
+  opts.add("readers"  , 0 , "<rthreads>"   , p.readers,    "(max) number of reader threads");
+  opts.add("buffers"  , 0 , "<buffers>"    , p.buffers,    "number of buffers (debug only!)");
+  opts.add("mandump"  , 0 , ""             , p.do_mandump, "dump raw manpage to stdout");
 
   rc=opts.parse(argc,argv);
   if(rc) die ("Invalid option");
@@ -498,38 +489,40 @@ int main(int argc, char** argv) {
   
   showtitle();
   if(p.do_delete)  {
-    cout << "Deleting database " << dbname << endl;
-    Database::deletedb(dbname); exit(0);
+    if(!g_quiet) cout << "Deleting database " << p.dbname << endl;
+    Database::deletedb(p.dbname); exit(0);
   }
   
   // Build filelist
   if(optind<argc || !isatty(fileno(stdin)) ) {
     if (!isatty(fileno(stdin)))
-      filelist.open("/dev/stdin");
+      filelist.push_back(FileData("/dev/stdin"));
     for (int i = optind; i < argc; ++i)
-      filelist.open(argv[i]);
+      filelist.push_back(FileData(argv[i]));
     if(!parameters.append) { // not appending -> delete old database
-      cout << "Creating new database " << dbname << endl;
-      Database::deletedb(dbname);
-      QddaDB::createdb(dbname);
+      if(!g_quiet) cout << "Creating new database " << p.dbname << endl;
+      Database::deletedb(p.dbname);
+      QddaDB::createdb(p.dbname);
     }
   }
   if((p.dbtestopts.size() || p.do_cputest) && !p.append) {
-    cout << "Creating new database " << dbname << endl;
-    Database::deletedb(dbname);
-    QddaDB::createdb(dbname);
+    if(!g_quiet) cout << "Creating new database " << p.dbname << endl;
+    Database::deletedb(p.dbname);
+    QddaDB::createdb(p.dbname);
   }    
-  QddaDB db(dbname);
+  QddaDB db(p.dbname);
   db.parsemetadata(parameters.array);
+
   if(filelist.size()>0) 
     analyze(filelist, db, parameters);
+
   if(g_abort) return 1;
 
-  if(p.do_purge)             { db.vacuum(); exit(0); }
+  if(p.do_purge)             { db.vacuum();         exit(0); }
   else if(!p.import.empty()) { import(db,p.import); exit(0); } // import(db,p)
-  else if(p.do_cputest)      { cputest(db) ; exit(0); } 
-  else if(p.dbtestopts.size()) { dbtest(db, p); exit(0); }
+  else if(p.do_cputest)      { cputest(db) ;        exit(0); } 
+  else if(p.dbtestopts.size()) { dbtest(db, p);     exit(0); }
   if(!parameters.skip)       { merge(db,parameters); } // merge staging data if any
-  if(parameters.detail)      { reportHistograms(db); }
+  if(parameters.detail)      { reportDetail(db); }
   else if (!p.skip)          { report(db); }
 }

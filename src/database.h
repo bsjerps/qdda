@@ -13,6 +13,7 @@
 #include <limits.h>
 #include "contrib/sqlite3.h"
 
+// dirty hack to improve readability
 #define string std::string
 
 /*******************************************************************************
@@ -27,43 +28,38 @@ int fileDeleteSqlite3(const string& s); // same for string type
 int fileDeleteSqlite3(const char * fn);      // delete only if file is SQLite3
 
 /*******************************************************************************
- * Structs
+ * Query class
+ * hold a prepared SQLite query. Automatically finalized by destructor
+ * provides a set of access and prepare functions to run the query
  ******************************************************************************/
-
-/*******************************************************************************
- * Classes
- ******************************************************************************/
-
-// a class to hold a prepared SQLite query. Automatically finalized by destructor
-// Exec Can be called with one or 2 ulongs and return an ulong in case of
-// select statement
 
 class Query {
 public:
-  Query(sqlite3* db,const char *);
-  ~Query();
-  
-  void  finalize();
-  void  print(std::ostream& os);
-  const char *sql();
-  int   bind(const ulong);
-  int   bind(const char*);
-  int   bind(const string&);
-  void  exec();
-  ulong execl();
-  ulong execl(ulong);
-  ulong execl(ulong,ulong);
-  const string exectext();
-  void  report(const string& tabs);
+  Query(sqlite3* db,const char *);  // create and prepare a query
+  ~Query();                         // call finalize
+  void  printerr(const string&);
+  void  print(std::ostream& os);    // print the expanded sql after running step()
+  const char *sql();                // return the query text
+  int   bind(const ulong);          // bind next parameter
+  int   bind(const char*);          // same for char*
+  int   bind(const string&);        // same for string
+  void  exec();                     // execute query, ignore results
+  ulong execl();                    // execute query, return ulong
+  ulong execl(ulong p);             // same but bind parameter first
+  ulong execl(ulong p,ulong q);     // 2 parameters
+  const string str();               // return string result
+  void  report(std::ostream& os, const string& tabs); // run a query as report
+  operator const ulong();           // default type conversion is unsigned long
 private:
-  int step();
-  int reset();
-  int prep(sqlite3* db, const char* query);
-  int ref; // param refcount
+  std::ostream& errstream = std::cerr;
+  Query(const Query&);              // disable copy i.e. auto = (Query)
+  int step();                       // execute query
+  int reset();                      // reset for next execution
+  int ref;                          // refcount for bind()ing parameters
   sqlite3_stmt *pStmt;
 };
 
-std::ostream& operator<<(std::ostream& stream, Query& statement);
+// std::ostream& operator<<(std::ostream& stream, Query& statement);
 
 // Class to hold the structure of the SQLite database and various statements
 class Database {
@@ -77,12 +73,16 @@ public:
   static int   deletedb(const string& fn);
   static int   exists(const char* fn);
   void         settmpdir (const string& d) { tmpdir = d; };
+  int          attach(const string& s, const string& p);
+  int          detach(const string& s);
   int          close();
   // various
-  // ulong        getlong(const string&);
-  // prefab queries
+  void         begin();
+  void         end();
   void         vacuum();
 protected:
+  Query* pq_begin;
+  Query* pq_end;
   void         sql(const string& query);
   sqlite3* db;           // global sqlite database
   string   tmpdir;       // SQLITE_TMPDIR
@@ -92,26 +92,18 @@ class StagingDB: public Database {
 public:
   StagingDB(const string& fn);
  ~StagingDB(); 
-  static void  createdb(const string& fn, ulong blocksize);
-  ulong        getblocksize();
-  ulong        getrows();
-  void         setblocksize(ulong);
-  int          fillrandom(ulong rows, int blocksize, int dup);
-  int          fillzero(ulong rows);
-  void         insertkv(ulong, ulong);
-  int          savemeta(const string name, ulong blocks, ulong bytes);
-  void         begin();
-  void         end();
-private:
-  Query q_setblocksize;
-  Query q_getblocksize;
-  Query q_getrows;
+  static void createdb(const string& fn, ulong blocksize);
+  int         fillrandom(ulong rows, int blocksize, int dup);
+  int         fillzero(ulong rows);
+  void        insertdata(ulong, ulong);
+  int         savemeta(const string name, ulong blocks, ulong bytes);
+  Query blocksize;
+  Query rows;
+  Query setblocksize;
   Query q_insert;
   Query q_meta;
   Query q_fillrand;
   Query q_fillzero;
-  Query q_begin;
-  Query q_end;
 };
 
 class QddaDB: public Database {
@@ -125,55 +117,29 @@ public:
   void         set_comp_method();
   void         setmetadata(int blocksize, const string& compr, const string& name, const string& buckets);
   void         parsemetadata(string);
-  ulong        getallocated();
-  ulong        getzero();
-  ulong        gettotal();
-  ulong        getused();
-  ulong        getunique();
-  ulong        getnuniq();
-  ulong        getdeduped();
-  ulong        getbytescompressedraw();
-  ulong        getbytescompressednet();
-  ulong        getblocksize();
-  const string getarrayid();
+  void         update();
   ulong        gettmpblocksize();
-  ulong        getrows();
   ulong        gettmprows();
   void         copymeta();
-  void         report_files(const string& tabs);
-  void         report_dedupe(const string& tabs);
-  void         report_compress(const string& tabs);
+  Query hasmeta;
+  Query blocksize;
+  Query arrayid;
+  Query allocatedblocks;          
+  Query zeroblocks;
+  Query totalblocks;
+  Query uniqueblocks;
+  Query nonuniqblocks;
+  Query dedupedblocks;
+  Query bytescompressedraw;
+  Query bytescompressednet;
+  Query usedblocks;
+  Query rows;
+  Query filelist;
+  Query compresshistogram;
+  Query dedupehistogram;
 private:
-  // prepared queries
-  Query q_getblocksize;
-  Query q_getrows;
-  Query q_getallocated;
-  Query q_getarrayid;
-  
-  Query q_getzero;
-  Query q_gettotal;
-  Query q_getused;
-  Query q_getunique;
-  Query q_getnuniq;
-  Query q_getdeduped;
-
-  Query q_getbytescompressedraw;
-  Query q_getbytescompressednet;
-  
-  Query q_attach;
-  Query q_detach;
   Query q_loadbuckets;
   Query q_truncbuckets;
-
-
-  Query q_listfiles;
-  Query q_trunc_sums_compr;
-  Query q_trunc_sums_deduped;
-  Query q_update_sums_compr;
-  Query q_update_sums_deduped;
-//  Query q_report_zeroes;
-  Query q_hist_compress;
-  Query q_hist_dedupe;
 };
 
 #undef string

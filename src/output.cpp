@@ -78,20 +78,21 @@ const string formatName(string s) {
 // Print stats report
 void report(QddaDB& db) {
   if(g_quiet) return;
-  auto blocksize         = db.getblocksize();
-  string arrayid         = db.getarrayid();
+  //ulong blocksize        = db.blocksize;
+  ulong blocksize = 16;
+  string arrayid         = db.arrayid.str();
   const float blocks2mb  = blocksize/1024.0;
   const float bytes2mb   = 1.0/1048576;
 
-  ulong blocks_total     = db.gettotal();              // Total blocks (total file size)
-  ulong blocks_used      = db.getused();               // Total used blocks
-  ulong blocks_free      = db.getzero();               // Total zero blocks
-  ulong blocks_dedup     = db.getdeduped();            // Unique hashes (deduped) between 0 and max
-  ulong blocks_alloc     = db.getallocated();          // blocks required after bucket compression
-  ulong blocks_unique    = db.getunique();             // Hashes with count=1 (non-dedupable data)
-  ulong blocks_nuniq     = db.getnuniq();              // count>1 (dedupable data)
-  ulong bytes_compr_raw  = db.getbytescompressedraw(); // compressed bytes before dedup
-  ulong bytes_compr_net  = db.getbytescompressednet(); // compressed bytes after dedup
+  ulong blocks_total     = db.totalblocks;              // Total blocks (total file size)
+  ulong blocks_used      = db.usedblocks;               // Total used blocks
+  ulong blocks_free      = db.zeroblocks;               // Total zero blocks
+  ulong blocks_dedup     = db.dedupedblocks;            // Unique hashes (deduped) between 0 and max
+  ulong blocks_alloc     = db.allocatedblocks;          // blocks required after bucket compression
+  ulong blocks_unique    = db.uniqueblocks;             // Hashes with count=1 (non-dedupable data)
+  ulong blocks_nuniq     = db.nonuniqblocks;              // count>1 (dedupable data)
+  ulong bytes_compr_raw  = db.bytescompressedraw; // compressed bytes before dedup
+  ulong bytes_compr_net  = db.bytescompressednet; // compressed bytes after dedup
   ulong blocks_merged    = blocks_used - blocks_dedup; // blocks saved by dedup
 
   // ratios & percentages - divide by zero -> 0
@@ -113,7 +114,7 @@ void report(QddaDB& db) {
   << endl << "Database info (" << db.filename() << "):"
   << endl << formatName("database size")       << setprecision(2) << fixed << filesize << " MiB"
   << endl << formatName("array id")            << arrayid
-  << endl << formatName("blocksize")           << toString(blocksize) + " KiB"
+  //<< endl << formatName("blocksize")           << toString(blocksize) + " KiB"
   << endl
   << endl << "Overview:"
   << endl << formatName("total")               << formatMib(blocks_total     * blocks2mb) << formatBlocks(blocks_total)
@@ -144,14 +145,14 @@ void report(QddaDB& db) {
 
 
 // print extended report with file info and dedupe/compression histograms
-void reportHistograms(QddaDB& db) {
+void reportDetail(QddaDB& db) {
 
   cout << "File list:" << endl;
-  db.report_files("8,-6,-10,-11,18,80");
+  db.filelist.report(cout, "8,-6,-10,-11,18,80");
 
   cout << endl << "Dedupe histogram:" << endl;
-  db.report_dedupe("12,-12,-18,-12");
+  db.dedupehistogram.report(cout, "12,-12,-18,-12");
 
-  cout << endl << "Compression Histogram (" << db.getarrayid() << "): " << endl;
-  db.report_compress("12,-12,-12,-12,-12");
+  cout << endl << "Compression Histogram (" << db.arrayid << "): " << endl;
+  db.compresshistogram.report(cout, "12,-12,-12,-12,-12");
 }
