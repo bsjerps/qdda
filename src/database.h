@@ -51,7 +51,6 @@ public:
   void  report(std::ostream& os, const string& tabs); // run a query as report
   operator const ulong();           // default type conversion is unsigned long
 private:
-  std::ostream& errstream = std::cerr;
   Query(const Query&);              // disable copy i.e. auto = (Query)
   int step();                       // execute query
   int reset();                      // reset for next execution

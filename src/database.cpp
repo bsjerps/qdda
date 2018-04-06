@@ -107,12 +107,12 @@ Query::Query(sqlite3* db, const char* query) {
   const char * pzTest;
   int rc=sqlite3_prepare_v2(db, query, strlen(query), &pStmt, &pzTest);
   if(rc==SQLITE_OK) return;
-  errstream << "MySQL prepare, query: " << query;
+  std::cerr << "MySQL prepare, query: " << query;
   die(sqlite3_errmsg(db));
 }
 
 void Query::printerr(const string& str) { 
-  errstream << str << std::endl;
+  std::cerr << str << std::endl;
 }
 
 Query::~Query()               { 
@@ -125,7 +125,7 @@ Query::operator const ulong() { return execl(); }
 int Query::bind(const ulong p) { 
   int rc = sqlite3_bind_int64(pStmt, ++ref, p);
   if(rc==SQLITE_OK) return 0;
-  errstream << "MySQL bind ulong, return code: " << rc << ", query = " << sql() << "\n";
+  std::cerr << "MySQL bind ulong, return code: " << rc << ", query = " << sql() << "\n";
   die(sqlite3_errmsg(sqlite3_db_handle(pStmt)));
   return rc; // we never get here
 };
@@ -133,7 +133,7 @@ int Query::bind(const ulong p) {
 int Query::bind(const char* p) {
   int rc = sqlite3_bind_text (pStmt, ++ref, p, strlen(p),SQLITE_STATIC);
   if(rc==SQLITE_OK) return 0;
-  errstream << "MySQL bind string, return code: " << rc << "\n";
+  std::cerr << "MySQL bind string, return code: " << rc << "\n";
   die(sqlite3_errmsg(sqlite3_db_handle(pStmt)));
   return rc; // we never get here
 };
@@ -146,7 +146,7 @@ int Query::step() {
   int rc = sqlite3_step(pStmt);
   if(rc==SQLITE_DONE) return 0;
   if(rc==SQLITE_ROW) return 0;
-  errstream << "MySQL step, return code: " << rc << "\n";
+  std::cerr << "MySQL step, return code: " << rc << "\n";
   die(sqlite3_errmsg(sqlite3_db_handle(pStmt)));
   return rc; // we never get here
 }
@@ -156,7 +156,7 @@ int Query::reset() {
   ref=0;
   int rc = sqlite3_reset(pStmt);
   if(rc==SQLITE_OK) return 0;
-  errstream << "MySQL reset, return code: " << rc << "\n";
+  std::cerr << "MySQL reset, return code: " << rc << "\n";
   die(sqlite3_errmsg(sqlite3_db_handle(pStmt)));
 }
 
