@@ -105,7 +105,7 @@ void printthread(Mutex& mutex, string msg) {
 // Request a free buffer - lock it and return the index
 // or spinwait forever until one is available
 int getFreeBuffer(SharedData& sd) {
-  for(;;) {
+  while(true) {
     for(int i=0; i < sd.size() ; i++) {
       if(sd.v_databuffer[i].trylock()) continue; // in use
       if(sd.v_databuffer[i].used==0) return i;   // lock ack'ed and buffer is empty
@@ -122,9 +122,8 @@ int getFreeBuffer(SharedData& sd) {
 // Request a filled buffer - lock it and return the index
 // or spinwait forever until one is available or if the readers are done is completed
 int getUsedBuffer(SharedData& sd, int& idx) {
-  int flag;
-  for(;;) {
-    flag=sd.read_completed; // readers are done, walk through buffers once more
+  while(true) {
+    bool flag = sd.read_completed; // readers are done, walk through buffers once more
     for(idx=0; idx < sd.size() ; idx++) {
       if(sd.v_databuffer[idx].trylock()) continue; // in use
       if(sd.v_databuffer[idx].used!=0) return 0;   // lock ack'ed and buffer is not empty
@@ -170,7 +169,7 @@ void reader(int thread, SharedData& sd, v_FileData& filelist) {
     if(rc==0) {
       //ulong bytes = readstream(thread, sd, filelist[i].ifs);
       ulong bytes = readstream(thread, sd, filelist[i]);
-      sd.p_sdb->savemeta(filelist[i].filename, bytes/sd.blocksize/1024, bytes);
+      sd.p_sdb->insertmeta(filelist[i].filename, bytes/sd.blocksize/1024, bytes);
     }
     // deliberately refusing to unlock so files never get read 
     // multiple times by another thread

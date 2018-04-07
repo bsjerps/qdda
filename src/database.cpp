@@ -115,7 +115,7 @@ void Query::printerr(const string& str) {
   std::cerr << str << std::endl;
 }
 
-Query::~Query()               { 
+Query::~Query() { 
   // std::cerr << "closing: " << sql() << "\n" << std::flush;
   sqlite3_finalize(pStmt);
 }
@@ -142,7 +142,7 @@ int Query::bind(const string& p) { return bind(p.c_str()); };
 
 int Query::step() {
   if(!pStmt) die("Query statement not prepared");
-  //if(g_query) print(cout);
+  if(g_query) print(std::cout);
   int rc = sqlite3_step(pStmt);
   if(rc==SQLITE_DONE) return 0;
   if(rc==SQLITE_ROW) return 0;
@@ -447,7 +447,7 @@ int StagingDB::fillzero(ulong rows) {
   return 0;
 }
 
-int StagingDB::savemeta(string name, ulong blocks, ulong bytes) {
+int StagingDB::insertmeta(string name, ulong blocks, ulong bytes) {
   q_meta.bind(name);
   q_meta.bind(blocks);
   q_meta.bind(hostName());
@@ -475,10 +475,10 @@ QddaDB::QddaDB(const string& fn): Database(fn),
   bytescompressednet    (db,"select sum(bytes) from m_sums_compressed"),
   usedblocks            (db,"select sum(ref*count) from m_sums_deduped"),
   rows                  (db,"select count(*) from kv"),
-  compresshistogram(db,"select * from v_compressed union all "
-                     "select 'Total:', sum(buckets), sum(blocks),sum(MiB) from v_compressed"),
+  compresshistogram(db,"select * from v_compressed union all\n"
+                       "select 'Total:', sum(buckets), sum(blocks),sum(MiB) from v_compressed"),
   dedupehistogram(db,"select * from v_deduped union all \n"
-                   "select 'Total:',sum(blocks),sum(bytes),sum(MiB) from v_deduped"),
+                     "select 'Total:',sum(blocks),sum(bytes),sum(MiB) from v_deduped"),
   q_loadbuckets         (db,"insert or replace into buckets values (?)"),
   q_truncbuckets        (db,"delete from buckets"),
   filelist              (db,"select * from v_files")

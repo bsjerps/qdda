@@ -42,7 +42,6 @@
 #include <unistd.h>
 #include <lz4.h>
 #include <pthread.h>
-
 #include <stdlib.h>     /* srand, rand */
 
 #include "tools.h"
@@ -93,7 +92,7 @@ FileData::FileData(const string& file) {
     string msg = "File open failed, try:\nsudo setfacl -m u:";
     msg += getenv ("USER");
     msg += ":r ";
-    msg += file;
+    msg += fname;
     msg += "\n";
     die(msg);
   }
@@ -153,8 +152,8 @@ ulong hash_md5(const char * src, char* zerobuf, const int size) {
   MD5_Update(&ctx, src, size);
   MD5_Final(digest, &ctx);
   return                                // ignore chars 0-8
-    ((ulong)(digest[8]&0X0F)  << 56) +  // pick 4 bits from byte 7, 8 bits from 0-6 (total 60)
-    ((ulong)digest[9]  << 48) +         // enable this for 56-bit hashes vs 48-bit
+    ((ulong)(digest[8]&0X0F)  << 56) +  // pick 4 bits from byte 7
+    ((ulong)digest[9]  << 48) +         // all bits from byte 6 to 0
     ((ulong)digest[10] << 40) +         // convert char* to ulong but keeping
     ((ulong)digest[11] << 32) +         // the right order, only use lower 6 bytes (char 10-15)
     ((ulong)digest[12] << 24) +         // SQLite integer is 8 byte signed so we need to stay within
@@ -165,7 +164,6 @@ ulong hash_md5(const char * src, char* zerobuf, const int size) {
 
 // Get compressed bytes for a compressed block - lz4
 u_int compress(const char * src, char* buf, const int size) {
-  // memset(buf,0,MAX_BLKSIZE+1024);                       // no longer needed?
   int result = LZ4_compress_default(src, buf, size, size); // call LZ4 compression lib, only use bytecount & ignore data
   if(result>size) return size;                             // don't compress if size is larger than blocksize
   if(result==0) return size;
@@ -175,14 +173,7 @@ u_int compress(const char * src, char* buf, const int size) {
 /*******************************************************************************
  * Formatting & printing
  ******************************************************************************/
-/*
-// Dump the hash values
-void showdump(ulong block, ulong hash,ulong bytes) {
-  cout << dec << setw(9) << setfill('0') << block
-       << ","  << hex << setw(18) << showbase << internal << hash 
-       << ","  << dec << setw(5)  << bytes << endl;
-}
-*/
+
 // Show scan speed info
 void showprogress(const std::string& str) {
   if(g_quiet) return;
@@ -211,17 +202,17 @@ void progress(ulong blocks,ulong blocksize, ulong bytes, const char * msg) {
     prevbytes=bytes;
     filenum++;
   }
-  auto avgsvctm = stopwatch;                                // service time of xx bytes since start of file
-  auto cursvctm = stopwatch - prev;                         // service time of xx bytes since previous call
-  auto avgbw = safeDiv_ulong(bytes,avgsvctm);               // bytes per second since start of file
-  auto curbw = safeDiv_ulong((bytes-prevbytes),cursvctm);   // bytes per second since previous call
-  stringstream ss;                                          // generate a string with the progress message
+  auto avgsvctm = stopwatch;                               // service time of xx bytes since start of file
+  auto cursvctm = stopwatch - prev;                        // service time of xx bytes since previous call
+  auto avgbw = safeDiv_ulong(bytes,avgsvctm);              // bytes per second since start of file
+  auto curbw = safeDiv_ulong((bytes-prevbytes),cursvctm);  // bytes per second since previous call
+  stringstream ss;                                         // generate a string with the progress message
   ss << blocks        << " "                               // blocks scanned
      << blocksize     << "k blocks ("                      // blocksize
      << bytes/1048576 << " MiB) processed, "               // processed megabytes
-     << curbw << "/"  << avgbw << " MB/s (cur/avg)";         // current/average bandwidth
-  if(msg) ss << msg;                                        // add message if specified
-  ss << "                 " ;                               // blank rest of line
+     << curbw << "/"  << avgbw << " MB/s (cur/avg)";       // current/average bandwidth
+  if(msg) ss << msg;                                       // add message if specified
+  ss << "                 " ;                              // blank rest of line
   showprogress(ss.str());
   prev=stopwatch;  // save stopwatch time for next call
   prevbytes=bytes; // save byte count for next call
@@ -249,7 +240,7 @@ void merge(QddaDB& db, Parameters& parameters) {
   
   StagingDB sdb(tmpname);
 
-  stringstream ss1,ss2;
+  //stringstream ss2;
   ulong blocksize    = db.blocksize;
   ulong dbrows       = db.rows;
   ulong tmprows      = sdb.rows;
@@ -274,9 +265,6 @@ void merge(QddaDB& db, Parameters& parameters) {
     ulong index_rps = tmprows*1000000/stopwatch;
     ulong index_mbps = mib_staging*1000000/stopwatch;
     
-//    ss2 << ss1.str() << ", Joining" << flush;
-//    showprogress(ss2.str());
-
     stopwatch.reset();
     db.merge(tmpname);
     stopwatch.lap();
@@ -284,7 +272,6 @@ void merge(QddaDB& db, Parameters& parameters) {
     auto time_merge = stopwatch;
     ulong merge_rps = (tmprows+dbrows)*1000000/time_merge;
     ulong merge_mbps = (mib_staging+mib_database)*1000000/time_merge;
-    ss2 << " in " << stopwatch.seconds() << " sec (" << merge_rps << " blocks/s, " << merge_mbps << " MiB/s)";
     if(!g_quiet) cout 
       << " in " << stopwatch.seconds() << " sec (" 
       << merge_rps << " blocks/s, " 
@@ -307,7 +294,7 @@ void dbtest(QddaDB& db, Parameters& p) {
   
   ulong        rows = 0;  
   string       str;
-  stringstream ss(p.dbtestopts);
+  stringstream ss(p.testopts);
   
   while(ss.good()) {
     getline(ss,str,',');
@@ -338,7 +325,7 @@ void dbtest(QddaDB& db, Parameters& p) {
 
   stopwatch.lap();
   cout << "in " << stopwatch.seconds() << " s" << endl;
-  stagingdb.savemeta("mergetest", rows, rows*blocksize*1024);
+  stagingdb.insertmeta("mergetest", rows, rows*blocksize*1024);
 }
 
 // test hashing, compression and insert performance
@@ -408,13 +395,10 @@ void cputest(QddaDB& db) {
 
 
 void manpage() {
-  string cmd;
-  //cmd = "( qddaman=$(mktemp) ; ";
-  cmd = "(";
+  string cmd = "(";
   cmd += whoAmI();
   cmd += " --mandump > /tmp/qdda.1 ; man /tmp/qdda.1 ; rm /tmp/qdda.1 )";
   int rc=system(cmd.c_str());
-  exit(0);
 }
 
 const string& defaultDbName() {
@@ -423,9 +407,22 @@ const string& defaultDbName() {
   return dbname;
 }
 
-void showh(LongOptions& lo) {
+void showhelp(LongOptions& lo) {
   std::cout << "\nUsage: qdda <options> [FILE]...\nOptions:" << "\n";
   lo.printhelp(cout);
+  std::cout << "\nMore info: qdda --man \nor the project homepage: http://outrun.nl/wiki/qdda\n\n";
+}
+
+void showlist() {
+  showtitle();
+  std::cout << "\narray options:\n\n"
+    << "  --array x1    - XtremIO X1\n"
+    << "  --array x2    - XtremIO X2\n"
+    << "  --array vmax1 - VMAX All Flash (experimental)\n"
+    << "  --array name=<name>,bs=<blocksize>,buckets=<bucketlist>\n\n"
+    << "  blocksize in kb between 1 and 128, buckets in kb separated by +\n"
+    << "  example: --array name=foo,bs=32,buckets=8+16+24+32\n"
+    ;
 }
 
 void mandump(LongOptions& lo) {
@@ -464,14 +461,15 @@ int main(int argc, char** argv) {
   opts.add("delete"   , 0 , ""             , p.do_delete,  "Delete database");
   opts.add("quiet"    ,'q', ""             , g_quiet,      "Don't show progress indicator or intermediate results");
   opts.add("bandwidth",'b', "<mb/s>"       , p.bandwidth,  "Throttle bandwidth in MB/s (default 200, 0=disable)");
-  opts.add("array"    , 0 , "<arraydef>"   , p.array,      "set array type/id or use custom definition"); // need list option
+  opts.add("array"    , 0 , "<id|custom>"  , p.array,      "set array <x1|x2|vmax1|custom> - see manpage for info");
+  opts.add("list"     ,'l', ""             , showlist,     "list supported array types and custom definition options");
   opts.add("append"   ,'a', ""             , p.append,     "Append data instead of deleting database");
   opts.add("detail"   ,'x', ""             , p.detail,     "Detailed report (file info and dedupe/compression histograms)");
   opts.add("dryrun"   ,'n', ""             , p.dryrun,     "skip staging db updates during scan");
   opts.add("purge"    , 0 , ""             , p.do_purge,   "Reclaim unused space in database (sqlite vacuum)");
   opts.add("import"   , 0 , "<file>"       , p.import,     "import another database (must have compatible metadata)");
   opts.add("cputest"  , 0 , ""             , p.do_cputest, "Single thread CPU performance test");
-  opts.add("dbtest"   , 0 , "<testpars>"   , p.dbtestopts, "Database performance test");
+  opts.add("dbtest"   , 0 , "<testpars>"   , p.testopts,   "Database performance test");
   opts.add("nomerge"  , 0 , ""             , p.skip,       "Skip staging data merge and reporting, keep staging database");
   opts.add("debug"    , 0 , ""             , g_debug,      "Enable debug output");
   opts.add("queries"  , 0 , ""             , g_query,      "Show SQLite queries and results"); // --show?
@@ -484,8 +482,9 @@ int main(int argc, char** argv) {
   rc=opts.parse(argc,argv);
   if(rc) die ("Invalid option");
 
-  if(p.do_help)         { showh(opts); exit(0); }
+  if(p.do_help)         { showhelp(opts); exit(0); }
   else if(p.do_mandump) { mandump(opts); exit(0); }
+
   
   showtitle();
   if(p.do_delete)  {
@@ -505,7 +504,7 @@ int main(int argc, char** argv) {
       QddaDB::createdb(p.dbname);
     }
   }
-  if((p.dbtestopts.size() || p.do_cputest) && !p.append) {
+  if((p.testopts.size() || p.do_cputest) && !p.append) {
     if(!g_quiet) cout << "Creating new database " << p.dbname << endl;
     Database::deletedb(p.dbname);
     QddaDB::createdb(p.dbname);
@@ -519,10 +518,11 @@ int main(int argc, char** argv) {
   if(g_abort) return 1;
 
   if(p.do_purge)             { db.vacuum();         exit(0); }
-  else if(!p.import.empty()) { import(db,p.import); exit(0); } // import(db,p)
+  else if(!p.import.empty()) { import(db,p.import); exit(0); }
   else if(p.do_cputest)      { cputest(db) ;        exit(0); } 
-  else if(p.dbtestopts.size()) { dbtest(db, p);     exit(0); }
-  if(!parameters.skip)       { merge(db,parameters); } // merge staging data if any
+  else if(p.testopts.size()) { dbtest(db, p);       exit(0); }
+
+  if(!parameters.skip)       { merge(db,parameters); }
   if(parameters.detail)      { reportDetail(db); }
   else if (!p.skip)          { report(db); }
 }

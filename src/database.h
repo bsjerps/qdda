@@ -48,8 +48,8 @@ public:
   ulong execl(ulong p);             // same but bind parameter first
   ulong execl(ulong p,ulong q);     // 2 parameters
   const string str();               // return string result
-  void  report(std::ostream& os, const string& tabs); // run a query as report
   operator const ulong();           // default type conversion is unsigned long
+  void  report(std::ostream& os, const string& tabs); // run a query as report
 private:
   Query(const Query&);              // disable copy i.e. auto = (Query)
   int step();                       // execute query
@@ -57,8 +57,6 @@ private:
   int ref;                          // refcount for bind()ing parameters
   sqlite3_stmt *pStmt;
 };
-
-// std::ostream& operator<<(std::ostream& stream, Query& statement);
 
 // Class to hold the structure of the SQLite database and various statements
 class Database {
@@ -95,7 +93,7 @@ public:
   int         fillrandom(ulong rows, int blocksize, int dup);
   int         fillzero(ulong rows);
   void        insertdata(ulong, ulong);
-  int         savemeta(const string name, ulong blocks, ulong bytes);
+  int         insertmeta(const string name, ulong blocks, ulong bytes);
   Query blocksize;
   Query rows;
   Query setblocksize;

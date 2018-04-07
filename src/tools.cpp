@@ -216,7 +216,6 @@ void LongOptions::printhelp(std::ostream& os) {
        << std::left << opts[i].desc
        << std::endl;
   }
-  os << "\nMore info: qdda --man \nor the project homepage: http://outrun.nl/wiki/qdda\n\n";
 }
 
 void LongOptions::printman(std::ostream& os) {
@@ -237,7 +236,6 @@ const option* LongOptions::long_opts() {
     o[i] = x;
   }
   o[opts.size()] = (option) { 0,0,0,0 };
-  // add last element??
   return o;
 }
 
@@ -253,9 +251,8 @@ int LongOptions::parse(int argc, char** argv) {
   while ((c = getopt_long(argc, argv, optstr.c_str(), long_opts(), NULL)) != -1) {
     for(int i=0;i<opts.size();i++) {
       if(c=='?') return 1;
-      // if(c=='h') { printhelp(std::cout,""); exit(0); }
       if(c==opts[i].val) {
-        if(opts[i].func)    { opts[i].func(); }
+        if(opts[i].func)    { opts[i].func(); exit(0); }
         if(opts[i].p_bool)  { *opts[i].p_bool = true; }
         if(!hasarg(i)) continue;
         if(opts[i].p_ulong) { *opts[i].p_ulong = atol(optarg); }
@@ -268,10 +265,8 @@ int LongOptions::parse(int argc, char** argv) {
   return 0;
 }
 
-/* Signal Handler for SIGINT */
+// Signal Handler for SIGINT (i.e. ctrl-c)
 void setabort(int sig_num) {
-  /* Reset handler to catch SIGINT next time.
-  Refer http://en.cppreference.com/w/c/program/signal */
   signal(SIGINT, setabort);
   g_abort = true;  
 }

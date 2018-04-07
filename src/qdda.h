@@ -50,30 +50,13 @@ public:
   int limit_mb;
 };
 
-/*
-// Vectored list of open streams (files)
-class Filelist {
-public:
- ~Filelist();
-  std::ifstream& operator[](uint);
-  int            size();
-  ulong          getBytes(int i);
-  ulong          getBlocks(int i);
-  const string&  name(int i);
-  void           open(const char *);
-private:
-  std::vector <std::ifstream *> ifs;
-  std::vector <string> filename;
-  std::vector <int> limit_mb;
-};*/
-
 // Parameter set to pass between functions
 struct Parameters {
   string dbname;
   string tmpdir;
   string array;
   string import;
-  string dbtestopts;
+  string testopts;
   int  bandwidth; // default bandwidth throttle (MB/s)
   int  workers;   // number of workers (threads)
   int  readers;   // max number of readers
@@ -86,6 +69,7 @@ struct Parameters {
   bool do_delete;
   bool queries;
   bool skip;
+  bool list;
   bool dryrun;
   bool append;
   bool quiet;
