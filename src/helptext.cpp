@@ -372,38 +372,3 @@ If blocks are shifted by just one byte, then all hashes will be different and an
 )";
 
 
-const char* qdda_manpage2 = R"(
-See the long help for additional safety options.
-
-                      *** Overview ***
-total               = Total data blocks scanned
-used                = Used (non-zero) space
-deduped             = Required space after deduplication
-deduped+compressed  = Required space after applying compression (array specific)
-                      *** Details ***
-Compression method  = Description of array/method
-blocksize           = Dedupe blocksize
-free (zero)         = Zeroed blocks (not allocated)
-compress pre dedup  = Sum of bytes of compressed blocks (before dedupe)
-merged by dedupe    = Space saved by deduplication
-compress post dedup = Sum of bytes of compressed blocks (after dedupe)
-unique data         = Blocks that can't be deduped
-duped 2:1           = Blocks that are deduped 2:1
-duped >2x           = Blocks that are deduped more than 2:1
-duped total         = Blocks that are deduped 2:1 or more
-                      *** Summary ***
-percentage used     = Used capacity / Total capacity
-percentage free     = Free capacity (zeroed)
-deduplication ratio = used capacity / deduped capacity
-compression ratio   = deduped and compressed / deduped
-thin ratio          = Free capacity / Total capacity
-combined            = dedup * compressed * thin ratio
-raw capacity        = Total scanned (allocated)
-net capacity        = Total required after optimizations
-
-Hash calculations are highly accurate up to roughly 10TB data using 16K blocksize,
-after which hash collisions may cause increasingly inaccurate results.
-
-More info: http://outrun.nl/wiki/qdda
-)";
-

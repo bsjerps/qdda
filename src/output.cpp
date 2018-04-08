@@ -114,7 +114,7 @@ void report(QddaDB& db) {
   << endl << "Database info (" << db.filename() << "):"
   << endl << formatName("database size")       << setprecision(2) << fixed << filesize << " MiB"
   << endl << formatName("array id")            << arrayid
-  //<< endl << formatName("blocksize")           << toString(blocksize) + " KiB"
+  << endl << formatName("blocksize")           << toString(blocksize) + " KiB"
   << endl
   << endl << "Overview:"
   << endl << formatName("total")               << formatMib(blocks_total     * blocks2mb) << formatBlocks(blocks_total)

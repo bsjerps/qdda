@@ -477,6 +477,7 @@ int main(int argc, char** argv) {
   opts.add("workers"  , 0 , "<wthreads>"   , p.workers,    "number of worker threads");
   opts.add("readers"  , 0 , "<rthreads>"   , p.readers,    "(max) number of reader threads");
   opts.add("buffers"  , 0 , "<buffers>"    , p.buffers,    "number of buffers (debug only!)");
+//  opts.add("dump"     , 0 , "<hash>"       , p.dumphash,   "number of buffers (debug only!)");
   opts.add("mandump"  , 0 , ""             , p.do_mandump, "dump raw manpage to stdout");
 
   rc=opts.parse(argc,argv);

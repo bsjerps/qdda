@@ -12,6 +12,7 @@
 
 long threadpid();
 
+
 // simple Mutex class
 class Mutex {
 public:
@@ -34,14 +35,18 @@ public:
   void  unlock();
   void  reset();           // clear buffer and temp counters;
   ulong bufsize;           // size of the read buffer in bytes
-  int   used;              // number of read blocks in the structure
+  int   used;              // number of used blocks in the buffer
+  int   status;            // 0 = free, 1 = filled, 2 = processed
   ulong blocks;            // blocks read
   ulong bytes;             // bytes read
   char* readbuf;           // the actual data
+  std::vector<ulong> v_hash;
+  std::vector<ulong> v_bytes;
+  ulong offset;            // offset of the first block
   char* operator[](int n); // access to the nth block in the buffer
+  Mutex mutex;  
 private:
   ulong blocksize_kb;
-  Mutex mutex;
 };
 
 // IOThrottle holds shared data to provide IO bandwidth throttling
@@ -60,8 +65,11 @@ class SharedData {
 public:
   SharedData(int buffers, int files, ulong blocksize, StagingDB*, int mibps);
  ~SharedData();
+  void lock()   { mutex.lock(); }
+  void unlock() { mutex.unlock(); }
   int size();
   bool                    read_completed;
+  bool                    work_completed;
   std::vector<DataBuffer> v_databuffer;
   ulong                   blocksize;
   ulong                   blocks, bytes;
@@ -71,7 +79,7 @@ public:
   IOThrottle              throttle;
   Mutex                   mutex_output;
   Mutex                   mutex_database;
-  Mutex                   mutex_self;
+  Mutex                   mutex;
   Mutex*                  a_mutex_files;
   int                     blockspercycle;
 private:

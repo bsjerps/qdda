@@ -14,6 +14,8 @@
 #include <vector>
 #include <sstream>
 
+#include <string.h>
+
 struct option;
 
 // dirty hack to improve readability

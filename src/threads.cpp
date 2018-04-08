@@ -8,15 +8,17 @@
  * -----------------------------------------------------------------------------
  ******************************************************************************/
 
-#include <semaphore.h>
-#include <sys/types.h>
-#include <sys/syscall.h>
-#include <unistd.h>
+
 #include <iostream>
 #include <fstream>
 #include <iomanip>
 #include <thread>
-#include <string.h>
+#include <string>
+#include <mutex>
+
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/syscall.h>
 
 #include "tools.h"
 #include "database.h"
@@ -32,17 +34,19 @@ extern bool g_quiet;
 extern bool g_abort;
 
 DataBuffer::DataBuffer(ulong blocksize, ulong blocksps) {
-  // ulong blockspercycle = (iosizex * 1024) / blocksize ;
   blocksize_kb = blocksize * 1024;
   bufsize      = blocksize_kb * blocksps;
   readbuf      = new char[bufsize];
+  v_hash.resize(blocksps);
+  v_bytes.resize(blocksps);
   used         = 0;
+  status       = 0;
   blocks       = 0;
   bytes        = 0;
 }
 
 DataBuffer::~DataBuffer() { delete[] readbuf; }
-void DataBuffer::reset()  { memset(readbuf,0,bufsize); used=0; }
+void DataBuffer::reset()  { memset(readbuf,0,bufsize); used=0;}
 int DataBuffer::trylock() { return mutex.trylock(); }
 void DataBuffer::unlock() { mutex.unlock(); }
 
@@ -72,6 +76,7 @@ SharedData::SharedData(int buffers, int files, ulong blksz, StagingDB* db, int b
   blocksize      = blksz;
   blockspercycle = (iosizex * 1024) / blocksize / 1024;
   read_completed = false;
+  work_completed = false;
   blocks         = 0;
   bytes          = 0;
   cbytes         = 0;
@@ -96,7 +101,7 @@ int SharedData::size() { return bufsize; }
 long threadPid() { return (long int)syscall(SYS_gettid); }
 
 // print the thread id (debugging)
-void printthread(Mutex& mutex, string msg) {
+void printthread(std::mutex& mutex, string msg) {
   mutex.lock();
   if(g_debug) std::cerr << msg << std::endl << std::flush;
   mutex.unlock();
@@ -104,35 +109,41 @@ void printthread(Mutex& mutex, string msg) {
 
 // Request a free buffer - lock it and return the index
 // or spinwait forever until one is available
-int getFreeBuffer(SharedData& sd) {
+int getFreeBuffer(SharedData& sd, int& idx) {
+  static int prev = 0;
+  static Mutex mutex;
+  int offset;
+  mutex.lock();
+  offset = prev + 1;
+  mutex.unlock();
   while(true) {
     for(int i=0; i < sd.size() ; i++) {
-      if(sd.v_databuffer[i].trylock()) continue; // in use
-      if(sd.v_databuffer[i].used==0) return i;   // lock ack'ed and buffer is empty
-      sd.v_databuffer[i].unlock();               // buffer is full, release lock
+      idx = (i+offset) % sd.size();
+      if(sd.v_databuffer[idx].trylock()) continue; // in use
+      if(sd.v_databuffer[idx].status==0) {
+        mutex.lock();
+        prev = idx;
+        mutex.unlock();
+        return 0;  // lock ack'ed and buffer is empty
+      }
+      sd.v_databuffer[idx].unlock();               // buffer is full, release lock
     }
     usleep(10000);          // no available buffers, sleep
-    sd.mutex_self.lock();   // increase the wait counter to measure
-    sd.rsleeps++;           // if we are CPU bound
-    sd.mutex_self.unlock();
-    if(g_abort) return 0;   // stop reading if we are interrupted (ctrl-c)
+    if(g_abort) return 1;   // stop reading if we are interrupted (ctrl-c)
   }
 }
 
 // Request a filled buffer - lock it and return the index
 // or spinwait forever until one is available or if the readers are done is completed
-int getUsedBuffer(SharedData& sd, int& idx) {
+int getUsedBuffer(SharedData& sd, int& index) {
   while(true) {
     bool flag = sd.read_completed; // readers are done, walk through buffers once more
-    for(idx=0; idx < sd.size() ; idx++) {
-      if(sd.v_databuffer[idx].trylock()) continue; // in use
-      if(sd.v_databuffer[idx].used!=0) return 0;   // lock ack'ed and buffer is not empty
-      sd.v_databuffer[idx].unlock();               // buffer is empty, release lock
+    for(index=0; index < sd.size(); index++) {
+      if(sd.v_databuffer[index].trylock()) continue; // in use
+      if(sd.v_databuffer[index].status==1) return 0; // lock ack'ed and buffer is not empty
+      sd.v_databuffer[index].unlock();               // buffer is empty, release lock
     }
-    usleep(10000);           // no available buffers, sleep
-    sd.mutex_self.lock();    // increase the wait counter to measure
-    sd.wsleeps++;            // if we are I/O bound
-    sd.mutex_self.unlock();
+    usleep(10000);     // no available buffers, sleep
     if(flag) return 1; // readers were done and we handled all remaining data
   }
 }
@@ -142,10 +153,13 @@ ulong readstream(int thread, SharedData& shared, FileData& fd) {
   ulong rbytes,blocks;
   ulong totbytes=0;
   const ulong blocksize = shared.blocksize;
+  int i;
   while(!fd.ifs->eof()) {
-    int i=getFreeBuffer(shared);
+    getFreeBuffer(shared,i);
     if(g_abort) return 0;
     shared.throttle.request(shared.blockspercycle * blocksize); // IO throttling, sleep if we are going too fast
+    shared.v_databuffer[i].offset = totbytes; //fd.ifs->tellg()/blocksize/1024;
+    shared.v_databuffer[i].status = 1;
     fd.ifs->read(shared.v_databuffer[i].readbuf, blocksize*1024*shared.blockspercycle);
     rbytes     = fd.ifs->gcount();
     blocks     = rbytes / blocksize / 1024; // amount of full blocks
@@ -153,8 +167,9 @@ ulong readstream(int thread, SharedData& shared, FileData& fd) {
     totbytes  += rbytes;
     shared.v_databuffer[i].used = blocks;
     shared.v_databuffer[i].unlock();
-    if(fd.limit_mb && totbytes >= fd.limit_mb*1048576) return totbytes;
+    if(fd.limit_mb && totbytes >= fd.limit_mb*1048576) break; // end if we only read a partial file
   }
+  fd.ifs->close();
   return totbytes;
 }
 
@@ -163,16 +178,13 @@ ulong readstream(int thread, SharedData& shared, FileData& fd) {
 void reader(int thread, SharedData& sd, v_FileData& filelist) {
   string self = "qdda-reader-" + toString(thread,0);
   pthread_setname_np(pthread_self(), self.c_str());
-  int rc;
   for(int i=0; i<filelist.size(); i++) {
-    rc=sd.a_mutex_files[i].trylock();
-    if(rc==0) {
-      //ulong bytes = readstream(thread, sd, filelist[i].ifs);
+    if(sd.a_mutex_files[i].trylock()) continue; // in use
+    if(filelist[i].ifs->is_open()) {
       ulong bytes = readstream(thread, sd, filelist[i]);
       sd.p_sdb->insertmeta(filelist[i].filename, bytes/sd.blocksize/1024, bytes);
     }
-    // deliberately refusing to unlock so files never get read 
-    // multiple times by another thread
+    sd.a_mutex_files[i].unlock();
   }
 }
 
@@ -182,47 +194,56 @@ void worker(int thread, SharedData& sd, Parameters& parameters) {
   string self = "qdda-worker-" + toString(thread,0);
   pthread_setname_np(pthread_self(), self.c_str());
   const ulong blocksize = sd.blocksize;
-  ulong* p_hash   = new ulong[sd.blockspercycle];
-  ulong* p_cbytes = new ulong[sd.blockspercycle];
-  char* dummy     = new char[blocksize*1024];
+  char*  dummy    = new char[blocksize*1024];
   int idx=0;
-  for(;;) {
+  ulong hash,bytes;
+  while (true) {
     if(getUsedBuffer(sd,idx)) break; // get filled buffer or end loop if processing is complete
     // first process all blocks in the buffer
     for(int i=0; i < sd.v_databuffer[idx].used; i++) {
       if(g_abort) return;
       DataBuffer& r_blockdata = sd.v_databuffer[idx]; // shorthand to buffer for readabily
-      p_hash[i]   = hash_md5(r_blockdata[i], dummy, blocksize*1024); // get hash
-      p_cbytes[i] = p_hash[i] ? compress(r_blockdata[i], dummy, blocksize*1024) : 0; // get bytes, 0 if hash=0
+      hash = hash_md5(r_blockdata[i], dummy, blocksize*1024); // get hash
+      bytes = hash ? compress(r_blockdata[i], dummy, blocksize*1024) : 0; // get bytes, 0 if hash=0
+      r_blockdata.v_hash[i] = hash;
+      r_blockdata.v_bytes[i] = bytes;
       sd.v_databuffer[idx].blocks++;
       sd.v_databuffer[idx].bytes += blocksize*1024;
-      sd.mutex_self.lock();
+      sd.lock();
       sd.blocks++;
       sd.bytes += blocksize*1024;
-      sd.mutex_self.unlock();
+      sd.unlock();
       sd.mutex_output.lock();
       if(sd.blocks%10000==0 || sd.blocks == 10) {
         progress(sd.blocks, blocksize, sd.bytes);           // progress indicator
-//      if(fileSystemFree(sd.p_sdb->filename()) < 256)      // TBD: abort if FS almost full
-//        die(string("\nfile system almost full! - ") + sd.p_sdb->filename());
       }
       sd.mutex_output.unlock();
     }
-    // batch store multiple results in the database (speed)
-    if(!parameters.dryrun) {
-      sd.mutex_database.lock();
-      sd.p_sdb->begin();
-      for(int i=0; i<sd.v_databuffer[idx].used; i++)
-        sd.p_sdb->insertdata(p_hash[i],p_cbytes[i]);
-      sd.p_sdb->end();
-      sd.mutex_database.unlock();
-    }
-    sd.v_databuffer[idx].reset();
+    sd.v_databuffer[idx].status = 2;
     sd.v_databuffer[idx].unlock();
   }
-  delete[] p_hash;
-  delete[] p_cbytes;
   delete[] dummy;
+}
+
+void updater(int thread, SharedData& sd, Parameters& parameters) {
+  pthread_setname_np(pthread_self(),"qdda-updater");
+  while(true) {
+    bool flag = sd.work_completed; // readers are done, walk through buffers once more
+    for(int i=0; i < sd.size() ; i++) {
+      if(sd.v_databuffer[i].trylock()) continue; // in use
+      if(sd.v_databuffer[i].status==2) {   // lock ack'ed and buffer is not empty
+        sd.p_sdb->begin();
+        for(int j=0; j<sd.v_databuffer[i].used; j++)
+          sd.p_sdb->insertdata(sd.v_databuffer[i].v_hash[j],sd.v_databuffer[i].v_bytes[j]);
+        sd.p_sdb->end();
+        sd.v_databuffer[i].reset();
+        sd.v_databuffer[i].status=0;
+      }
+      sd.v_databuffer[i].unlock();               // buffer is empty, release lock
+    }
+    usleep(10000);           // no available buffers, sleep
+    if(flag) return; // readers were done and we handled all remaining data
+  }
 }
 
 /*
@@ -252,16 +273,20 @@ void analyze(v_FileData& filelist, QddaDB& db, Parameters& parameters) {
     << buffers << " buffers, "
     << parameters.bandwidth << " MB/s max" << endl;
 
+  thread updater_thread;
   thread reader_thread[readers];
   thread worker_thread[workers];
   Stopwatch stopwatch;
 
+  updater_thread = thread(updater,0, std::ref(sd), std::ref(parameters));
   for(int i=0; i<workers; i++) worker_thread[i] = thread(worker, i, std::ref(sd), std::ref(parameters));
   for(int i=0; i<readers; i++) reader_thread[i] = thread(reader, i, std::ref(sd), std::ref(filelist));
 
   for(int i=0; i<readers; i++) reader_thread[i].join();
   sd.read_completed = true; //signal workers that reading is complete
   for(int i=0; i<workers; i++) worker_thread[i].join();
+  sd.work_completed = true; //signal updater that work is complete
+  updater_thread.join();
 
   stopwatch.lap();
   stringstream ss;
