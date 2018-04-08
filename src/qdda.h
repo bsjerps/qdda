@@ -57,6 +57,7 @@ struct Parameters {
   string array;
   string import;
   string testopts;
+  ulong searchhash;
   int  bandwidth; // default bandwidth throttle (MB/s)
   int  workers;   // number of workers (threads)
   int  readers;   // max number of readers

@@ -431,6 +431,13 @@ void mandump(LongOptions& lo) {
   cout << manpage_body;
 }
 
+void findhash(Parameters& parameters) {
+  string tmpname = parameters.tmpdir + "/qdda-staging.db";
+  StagingDB db(tmpname);
+  db.findhash.bind(parameters.searchhash);
+  db.findhash.report(cout,"20,10,10");
+}
+
 /*******************************************************************************
  * Main section - process options etc
  ******************************************************************************/
@@ -477,7 +484,7 @@ int main(int argc, char** argv) {
   opts.add("workers"  , 0 , "<wthreads>"   , p.workers,    "number of worker threads");
   opts.add("readers"  , 0 , "<rthreads>"   , p.readers,    "(max) number of reader threads");
   opts.add("buffers"  , 0 , "<buffers>"    , p.buffers,    "number of buffers (debug only!)");
-//  opts.add("dump"     , 0 , "<hash>"       , p.dumphash,   "number of buffers (debug only!)");
+  opts.add("findhash" , 0 , "<hash>"       , p.searchhash, "find blocks with hash=<hash> in staging db");
   opts.add("mandump"  , 0 , ""             , p.do_mandump, "dump raw manpage to stdout");
 
   rc=opts.parse(argc,argv);
@@ -522,8 +529,10 @@ int main(int argc, char** argv) {
   else if(!p.import.empty()) { import(db,p.import); exit(0); }
   else if(p.do_cputest)      { cputest(db) ;        exit(0); } 
   else if(p.testopts.size()) { dbtest(db, p);       exit(0); }
+  else if(p.searchhash!=0)   { findhash(p);       exit(0); }
 
   if(!parameters.skip)       { merge(db,parameters); }
   if(parameters.detail)      { reportDetail(db); }
   else if (!p.skip)          { report(db); }
 }
+

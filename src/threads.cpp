@@ -126,10 +126,54 @@ int getFreeBuffer(SharedData& sd, int& idx) {
         mutex.unlock();
         return 0;  // lock ack'ed and buffer is empty
       }
-      sd.v_databuffer[idx].unlock();               // buffer is full, release lock
+      sd.v_databuffer[idx].unlock(); // buffer is full, release lock
     }
-    usleep(10000);          // no available buffers, sleep
-    if(g_abort) return 1;   // stop reading if we are interrupted (ctrl-c)
+    //cout << "w" << flush;
+    usleep(10000);        // no available buffers, sleep
+    if(g_abort) return 1; // stop reading if we are interrupted (ctrl-c)
+  }
+}
+
+int getProcessedBuffer(SharedData& sd, int& idx) {
+  static int prev = 0;
+  static Mutex mutex;
+  int offset;
+  mutex.lock();
+  offset = prev + 1;
+  mutex.unlock();
+  while(true) {
+    bool flag = sd.work_completed; // workers are done, walk through buffers once more
+    for(int i=0; i < sd.size() ; i++) {
+      idx = (i+offset) % sd.size();
+      if(sd.v_databuffer[idx].trylock()) continue; // in use, try next
+      if(sd.v_databuffer[idx].status==2) { // lock ack'ed and buffer has processed data
+        mutex.lock();
+        prev = idx;
+        mutex.unlock();
+        return 0;
+      }
+      sd.v_databuffer[idx].unlock(); // buffer is unavailable, release lock
+    }
+    usleep(10000);
+    if(flag) return 1;
+  }
+}
+
+// updater thread, picks processed buffers and saves results
+// in staging database
+void updater(int thread, SharedData& sd, Parameters& parameters) {
+  pthread_setname_np(pthread_self(),"qdda-updater");
+  int idx=0;
+  while(true) {
+    if(getProcessedBuffer(sd,idx)) break; // get processed buffer or end loop if processing is complete
+    if(g_abort) return;
+    sd.p_sdb->begin();    
+    for(int j=0; j<sd.v_databuffer[idx].used; j++)
+      sd.p_sdb->insertdata(sd.v_databuffer[idx].v_hash[j],sd.v_databuffer[idx].v_bytes[j]);
+    sd.p_sdb->end();
+    sd.v_databuffer[idx].reset();
+    sd.v_databuffer[idx].status=0;
+    sd.v_databuffer[idx].unlock();
   }
 }
 
@@ -223,27 +267,6 @@ void worker(int thread, SharedData& sd, Parameters& parameters) {
     sd.v_databuffer[idx].unlock();
   }
   delete[] dummy;
-}
-
-void updater(int thread, SharedData& sd, Parameters& parameters) {
-  pthread_setname_np(pthread_self(),"qdda-updater");
-  while(true) {
-    bool flag = sd.work_completed; // readers are done, walk through buffers once more
-    for(int i=0; i < sd.size() ; i++) {
-      if(sd.v_databuffer[i].trylock()) continue; // in use
-      if(sd.v_databuffer[i].status==2) {   // lock ack'ed and buffer is not empty
-        sd.p_sdb->begin();
-        for(int j=0; j<sd.v_databuffer[i].used; j++)
-          sd.p_sdb->insertdata(sd.v_databuffer[i].v_hash[j],sd.v_databuffer[i].v_bytes[j]);
-        sd.p_sdb->end();
-        sd.v_databuffer[i].reset();
-        sd.v_databuffer[i].status=0;
-      }
-      sd.v_databuffer[i].unlock();               // buffer is empty, release lock
-    }
-    usleep(10000);           // no available buffers, sleep
-    if(flag) return; // readers were done and we handled all remaining data
-  }
 }
 
 /*

@@ -204,18 +204,20 @@ void Query::report(std::ostream& os, const string& tabstr) {
   }
   if(g_query) { print(std::cout); std::cout << std::endl; }
   int cols = sqlite3_column_count(pStmt);
-  for(int i=0;i<cols; i++) {
+  int i;
+  for(i=0;i<cols; i++) {
+    if(tabs[i]==0) break;
     if(tabs[i]>0) std::cout << std::left;
     else os << std::right;
     if(i<tabs.size()) os << std::setw(abs(tabs[i]));
     os << sqlite3_column_name(pStmt,i);
     if(i<cols-1) os << separator;
   }
-  os << "\n";
+  if(i) os << "\n";
 
   rc=sqlite3_step(pStmt);
   while(rc==SQLITE_ROW) {
-    for(int i=0;i<cols;i++) {
+    for(i=0;i<cols;i++) {
       if(tabs[i]>0) os << std::left;
       else os << std::right;
       int coltype = sqlite3_column_type(pStmt,i);
@@ -378,6 +380,7 @@ CREATE TABLE IF NOT EXISTS metadata(lock char(1) not null default 1
 ,constraint pk_t1 primary key(lock), constraint ck_t1_l check (lock=1));
 CREATE TABLE IF NOT EXISTS files(id integer primary key autoincrement, name TEXT, hostname TEXT, timestamp integer, blocks integer, bytes integer);
 CREATE TABLE IF NOT EXISTS staging(id integer primary key autoincrement, hash integer, bytes integer);
+CREATE VIEW IF NOT EXISTS offsets as with m(b) as (select blksz from metadata) select hash, (id-1) blocks, (id-1) * m.b*1024 bytes from staging,m
 )");
   StagingDB newdb(fn);
   newdb.setblocksize.execl(blocksize);
@@ -389,6 +392,7 @@ StagingDB::StagingDB(const string& fn): Database(fn),
   rows          (db,"select count(*) from staging"),
   q_insert      (db,"insert into staging(hash,bytes) values (?,?)"),
   q_meta        (db,"insert into files (name,blocks,hostname,timestamp,bytes) values (?,?,?,?,?)"),
+  findhash      (db,"select * from offsets where hash=?"),
   q_fillrand    (db,R"(
 with recursive 
 rnd(k,b) AS (

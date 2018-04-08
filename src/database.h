@@ -101,6 +101,7 @@ public:
   Query q_meta;
   Query q_fillrand;
   Query q_fillzero;
+  Query findhash;
 };
 
 class QddaDB: public Database {
