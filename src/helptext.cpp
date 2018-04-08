@@ -43,6 +43,8 @@ const char* manpage_body = R"(
 scan the first SCSI disk (usually the bootdisk) and show results.
 .P
 .B Example output
+.PP
+.in +4n
 .EX
 Overview:
 total               =    16384.00 MiB (   1048576 blocks)
@@ -69,6 +71,8 @@ combined            =        2.99
 raw capacity        =    16384.00 MiB
 net capacity        =     5485.09 MiB
 .EE
+.in
+.PP
 .P
 .B Explanation
 .IP Total 20
