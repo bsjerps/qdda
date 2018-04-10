@@ -110,6 +110,8 @@ void report(QddaDB& db) {
 
   float filesize = fileSize(db.filename()) * bytes2mb; // file size in MiB
 
+
+// add explanation row
   cout
   << endl << "Database info (" << db.filename() << "):"
   << endl << formatName("database size")       << setprecision(2) << fixed << filesize << " MiB"
@@ -123,7 +125,7 @@ void report(QddaDB& db) {
   << endl << formatName("dedupe savings")      << formatMib(blocks_merged    * blocks2mb) << formatBlocks(blocks_merged)
   << endl << formatName("deduped")             << formatMib(blocks_dedup     * blocks2mb) << formatBlocks(blocks_dedup)
   << endl << formatName("compressed")          << formatMib(bytes_compr_net  * bytes2mb)  << formatPerc(perc_postdedup)  
-  << endl << formatName("allocated capacity")  << formatMib(blocks_alloc     * blocks2mb) << formatBlocks(blocks_alloc)
+  << endl << formatName("allocated")           << formatMib(blocks_alloc     * blocks2mb) << formatBlocks(blocks_alloc)
   << endl
   << endl << "Details:"  
   << endl << formatName("used")                << formatMib(blocks_used      * blocks2mb) << formatBlocks(blocks_used)

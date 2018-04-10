@@ -34,7 +34,8 @@ extern const char* PROGVERSION;
 extern ulong       starttime;
 
 // dirty hack to improve readability
-#define string std::string
+//#define string std::string
+using namespace std;
 
 /*******************************************************************************
 * SQLite Schema definition:
@@ -81,7 +82,7 @@ int fileExists(const string& fn)        { return fileExists(fn.c_str());}
 int fileIsSqlite3(const string& fn)     { return fileIsSqlite3(fn.c_str());}
 int fileDeleteSqlite3(const string& fn) { return fileDeleteSqlite3(fn.c_str()); }
 
-// safety guards against overwriting existing files or devices by SQLite
+/*
 string parseFileName(const string& in) {
   string fn;
   char cwd[80];
@@ -95,7 +96,7 @@ string parseFileName(const string& in) {
   if (fn[fn.length()-1] == '/')             { die("Is directory: " + fn);}
   if(fileExists(fn) && !fileIsSqlite3(fn))  { die("Not a SQlite3 file: " + fn);}
   return fn;
-}
+}*/
 
 /*******************************************************************************
  * Query class functions
@@ -264,24 +265,24 @@ Database::Database(const string& fn) {
 int Database::createdb(const string& fn, const char* schema) {
   sqlite3* newdb; 
   char*    errmsg;
-  string newname = parseFileName(fn);
-  std::ifstream f(newname);
-  if(!f.fail()) die("File exists: " + newname);
-  int rc = sqlite3_open_v2(newname.c_str(), &newdb, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE, NULL);
+  // string newname = parseFileName(fn);
+  std::ifstream f(fn);
+  if(!f.fail()) die("File exists: " + fn);
+  int rc = sqlite3_open_v2(fn.c_str(), &newdb, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE, NULL);
   if( rc != SQLITE_OK ) {
     std::stringstream errmsg;
-    errmsg << "Can't create database, filename: " << newname << ": " << (char *)sqlite3_errmsg(newdb);
+    errmsg << "Can't create database, filename: " << fn << ": " << (char *)sqlite3_errmsg(newdb);
     die(errmsg.str());
   }
   // running vacuum on a new database ensures the database has the SQLite magic string instead of zero size
   rc = sqlite3_exec(newdb, "vacuum", 0, 0, &errmsg);
   if( rc != SQLITE_OK ) {
-    std::cerr << "SQL error preparing new database " << newname << std::endl;
+    std::cerr << "SQL error preparing new database " << fn << std::endl;
     die("Create database");
   }
   rc = sqlite3_exec(newdb, schema, 0, 0, &errmsg);
   if( rc != SQLITE_OK ) {
-    std::cerr << "SQL error creating schema on " << newname << std::endl;
+    std::cerr << "SQL error creating schema on " << fn << std::endl;
     die("Create schema");
   }
   return 0;
@@ -485,11 +486,14 @@ QddaDB::QddaDB(const string& fn): Database(fn),
                      "select 'Total:',sum(blocks),sum(bytes),sum(MiB) from v_deduped"),
   q_loadbuckets         (db,"insert or replace into buckets values (?)"),
   q_truncbuckets        (db,"delete from buckets"),
-  filelist              (db,"select * from v_files")
+  filelist              (db,"select * from v_files"),
+  tophash               (db,"select hash,blocks from kv where hash!=0 and blocks>1 order by blocks desc limit ?")
 {
   sql("PRAGMA schema_version");      // trigger error if not open
   sql("PRAGMA temp_store_directory = '" + tmpdir + "'");
   // sql("PRAGMA temp_store = 2"); // use memory for temp tables
+  sql("PRAGMA journal_mode = off");  // speed up, don't care about consistency
+  sql("PRAGMA synchronous = off");   // same
 }
 
 void QddaDB::createdb(const string& fn) {
@@ -636,7 +640,7 @@ void  QddaDB::merge(const string& name) {
                    "select hash,blocks,bytes from kv union all "
                    "select hash,1,bytes from tmpdb.staging"
                    ") insert or replace into kv "
-                   "select hash,sum(blocks),bytes from t group by hash order by hash");
+                   "select hash,sum(blocks),bytes from t group by hash"); //  order by hash
   Query q_copy(db, "insert into files (name,hostname,timestamp,blocks,bytes) "
                    "select name,hostname,timestamp,blocks,bytes from tmpdb.files");
   q_merge.exec();

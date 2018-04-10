@@ -83,9 +83,10 @@ ulong epoch();           // secs since 1970
 const char* hostName();  // system hostname
 const char* whoAmI();    // path to self
 const string& homeDir();
-int fileExists(const char * fn);           // return true if file exists
-long fileSystemFree(const char* filename); // filesystem free in MB for this file
-off_t fileSize(const char *filename);      // return size of file in bytes
+const string  dirName(const string& file);   // return dir portion of filename, including '/'
+int   fileExists(const char * fn);           // return true if file exists
+long  fileSystemFree(const char* filename);  // filesystem free in MB for this file
+off_t fileSize(const char *filename);        // return size of file in bytes
 
 void armTrap();   // interrupt handler, enable
 void resetTrap(); // disable

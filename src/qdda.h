@@ -53,6 +53,7 @@ public:
 // Parameter set to pass between functions
 struct Parameters {
   string dbname;
+  string stagingname;
   string tmpdir;
   string array;
   string import;
@@ -75,6 +76,7 @@ struct Parameters {
   bool append;
   bool quiet;
   bool detail;
+  int tophash;
 };
 
 #undef string

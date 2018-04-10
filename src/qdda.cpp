@@ -40,10 +40,10 @@
 #include <vector>
 
 #include <unistd.h>
-#include <lz4.h>
 #include <pthread.h>
 #include <stdlib.h>     /* srand, rand */
 
+#include "contrib/lz4.h"
 #include "tools.h"
 #include "database.h"
 #include "qdda.h"
@@ -60,7 +60,7 @@ using namespace std;
  ******************************************************************************/
 
 const char* PROGVERSION   = "2.0.0" RELEASE;
-const char* DEFAULT_TMP    = "/var/tmp"; // tmpdir for SQLite temp files
+//const char* DEFAULT_TMP    = "/var/tmp"; // tmpdir for SQLite temp files
 const ulong DEFAULT_BANDWIDTH = 200;     //
 
 /*******************************************************************************
@@ -235,10 +235,9 @@ void import(QddaDB& db, const string& filename) {
 
 // Merge staging data into kv table, track & display time to merge
 void merge(QddaDB& db, Parameters& parameters) {
-  string tmpname = parameters.tmpdir + "/qdda-staging.db";
-  if(!fileIsSqlite3(tmpname)) return;
+  if(!fileIsSqlite3(parameters.stagingname)) return;
   
-  StagingDB sdb(tmpname);
+  StagingDB sdb(parameters.stagingname);
 
   //stringstream ss2;
   ulong blocksize    = db.blocksize;
@@ -266,7 +265,7 @@ void merge(QddaDB& db, Parameters& parameters) {
     ulong index_mbps = mib_staging*1000000/stopwatch;
     
     stopwatch.reset();
-    db.merge(tmpname);
+    db.merge(parameters.stagingname);
     stopwatch.lap();
     
     auto time_merge = stopwatch;
@@ -277,7 +276,7 @@ void merge(QddaDB& db, Parameters& parameters) {
       << merge_rps << " blocks/s, " 
       << merge_mbps << " MiB/s)\n";
   }
-  Database::deletedb(tmpname.c_str());
+  Database::deletedb(parameters.stagingname);
 }
 
 
@@ -285,9 +284,8 @@ void merge(QddaDB& db, Parameters& parameters) {
 // sizegb:zeroval:dup1:dup2:...
 // totalsize,zero=xx,dup1=xx
 void dbtest(QddaDB& db, Parameters& p) {
-  string tmpname = p.tmpdir + "/qdda-staging.db";
-  StagingDB::createdb(tmpname,db.blocksize);
-  StagingDB stagingdb(tmpname);
+  StagingDB::createdb(p.stagingname,db.blocksize);
+  StagingDB stagingdb(p.stagingname);
 
   const ulong blocksize = db.blocksize;
   const ulong rowspergb = square(1024) / blocksize;
@@ -432,10 +430,39 @@ void mandump(LongOptions& lo) {
 }
 
 void findhash(Parameters& parameters) {
-  string tmpname = parameters.tmpdir + "/qdda-staging.db";
-  StagingDB db(tmpname);
+  StagingDB db(parameters.stagingname);
   db.findhash.bind(parameters.searchhash);
   db.findhash.report(cout,"20,10,10");
+}
+
+void tophash(QddaDB& db, int amount = 10) {
+  db.tophash.bind(amount);
+  db.tophash.report(cout,"20,10");
+}
+
+// safety guards against overwriting existing files or devices by SQLite
+void ParseFileName(string& name) {
+  char buf[160];
+  if(!getcwd(buf, 160)) die("Get CWD failed");
+  string cwd = buf;
+  if(name.empty()) name = homeDir() + "/qdda.db";
+  if(name[0] != '/') name = cwd + "/" + name;
+  while (name.find("//") < string::npos) {
+    auto i=name.find("//");
+    name.replace(i,2,"/");
+  }
+  if (!name.compare(0,4,"/dev")  )            { die("/dev not allowed in filename: " + name);}
+  if (!name.compare(0,5,"/proc") )            { die("/proc not allowed in filename: " + name);}
+  if (!name.compare(0,4,"/sys")  )            { die("/sys not allowed in filename: " + name);}
+  if (!name.find_last_of("/\\"))              { die("root dir not allowed: " + name);}
+  if(name.find(".db")>name.length()) name += ".db";
+}
+
+string genStagingName(string& name) {
+  string tmpname;
+  tmpname = name.substr(0,name.find(".db"));
+  tmpname += "-staging.db";
+  return tmpname;
 }
 
 /*******************************************************************************
@@ -450,11 +477,11 @@ int main(int argc, char** argv) {
   v_FileData  filelist;
 
   // set default values
-  p.dbname    = defaultDbName();
+  
   p.workers   = cpuCount();
   p.readers   = 32;
   p.bandwidth = DEFAULT_BANDWIDTH;
-  p.tmpdir    = DEFAULT_TMP;
+//  p.tmpdir    = DEFAULT_TMP;
   p.array     = "x2";
   
 //  -B <blksize_kb>   : Set blocksize to blksize_kb kilobytes
@@ -480,21 +507,28 @@ int main(int argc, char** argv) {
   opts.add("nomerge"  , 0 , ""             , p.skip,       "Skip staging data merge and reporting, keep staging database");
   opts.add("debug"    , 0 , ""             , g_debug,      "Enable debug output");
   opts.add("queries"  , 0 , ""             , g_query,      "Show SQLite queries and results"); // --show?
-  opts.add("tempdir"  , 0 , "<dir>"        , p.tmpdir,     "Set SQLite TEMPDIR (default /var/tmp");
+  opts.add("tmpdir"   , 0 , "<dir>"        , p.tmpdir,     "Set $SQLITE_TMPDIR for temporary files");
   opts.add("workers"  , 0 , "<wthreads>"   , p.workers,    "number of worker threads");
   opts.add("readers"  , 0 , "<rthreads>"   , p.readers,    "(max) number of reader threads");
-  opts.add("buffers"  , 0 , "<buffers>"    , p.buffers,    "number of buffers (debug only!)");
   opts.add("findhash" , 0 , "<hash>"       , p.searchhash, "find blocks with hash=<hash> in staging db");
+  opts.add("tophash"  , 0 , "<amount>"     , p.tophash,    "show top <amount> hashes by refcount");
   opts.add("mandump"  , 0 , ""             , p.do_mandump, "dump raw manpage to stdout");
+#ifdef __DEBUG
+  opts.add("buffers"  , 0 , "<buffers>"    , p.buffers,    "number of buffers (debug only!)");
+#endif
 
   rc=opts.parse(argc,argv);
   if(rc) die ("Invalid option");
 
   if(p.do_help)         { showhelp(opts); exit(0); }
   else if(p.do_mandump) { mandump(opts); exit(0); }
-
   
+  if(!p.tmpdir.empty()) setenv("SQLITE_TMPDIR",p.tmpdir.c_str(),1);
+
   showtitle();
+  ParseFileName(p.dbname);
+  p.stagingname = genStagingName(p.dbname);
+  
   if(p.do_delete)  {
     if(!g_quiet) cout << "Deleting database " << p.dbname << endl;
     Database::deletedb(p.dbname); exit(0);
@@ -525,14 +559,16 @@ int main(int argc, char** argv) {
 
   if(g_abort) return 1;
 
-  if(p.do_purge)             { db.vacuum();         exit(0); }
-  else if(!p.import.empty()) { import(db,p.import); exit(0); }
-  else if(p.do_cputest)      { cputest(db) ;        exit(0); } 
-  else if(p.testopts.size()) { dbtest(db, p);       exit(0); }
-  else if(p.searchhash!=0)   { findhash(p);       exit(0); }
-
-  if(!parameters.skip)       { merge(db,parameters); }
-  if(parameters.detail)      { reportDetail(db); }
-  else if (!p.skip)          { report(db); }
+  if(p.do_purge)             { db.vacuum();           }
+  else if(!p.import.empty()) { import(db,p.import);   }
+  else if(p.do_cputest)      { cputest(db) ;          } 
+  else if(p.testopts.size()) { dbtest(db, p);         }
+  else if(p.searchhash!=0)   { findhash(p);           }
+  else if(p.tophash!=0)      { tophash(db,p.tophash); }
+  else {
+    if(!parameters.skip)     { merge(db,parameters); }
+    if(parameters.detail)    { reportDetail(db); }
+    else if (!p.skip)        { report(db); }
+  }
 }
 

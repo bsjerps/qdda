@@ -19,7 +19,7 @@
 /*******************************************************************************
  * functions
  ******************************************************************************/
-string parseFileName(string& in);  // prevent illegal db filenames
+// string parseFileName(string& in);  // prevent illegal db filenames
 
 int fileIsSqlite3(const char * fn);          // test if file is SQLite3 format
 int fileIsSqlite3(const string& s);     // test if file is SQLite3 format
@@ -135,6 +135,7 @@ public:
   Query filelist;
   Query compresshistogram;
   Query dedupehistogram;
+  Query tophash;
 private:
   Query q_loadbuckets;
   Query q_truncbuckets;

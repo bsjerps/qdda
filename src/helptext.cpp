@@ -46,6 +46,12 @@ scan the first SCSI disk (usually the bootdisk) and show results.
 .PP
 .in +4n
 .EX
+
+Database info (/home/qdda/qdda.db):
+database size       = 14.41 MiB
+array id            = XtremIO X2
+blocksize           = 16 KiB
+
 Overview:
 total               =    16384.00 MiB (   1048576 blocks)
 free (zero)         =     2048.00 MiB (    131072 blocks)
@@ -53,7 +59,7 @@ used                =    14336.00 MiB (    917504 blocks)
 dedupe savings      =     4096.00 MiB (    262144 blocks)
 deduped             =    10240.00 MiB (    655360 blocks)
 compressed          =     5124.51 MiB (     49.96 %)
-allocated capacity  =     5485.09 MiB (    351046 blocks)
+allocated           =     5485.09 MiB (    351046 blocks)
 
 Details:
 used                =    14336.00 MiB (    917504 blocks)
@@ -75,7 +81,13 @@ net capacity        =     5485.09 MiB
 .PP
 .P
 .B Explanation
-.IP Total 20
+.IP Database\ size 20
+Size of the primary SQLite databse on disk
+.IP Array\ ID
+Name of array for which dedupe and compress estimates are calculated. Can be a custom string.
+.IP Blocksize
+Blocksize on which hashes and compression sizes are calculated
+.IP Total
 Total scanned blocks
 .IP Free
 Free (zero) blocks
@@ -86,11 +98,12 @@ Blocks saved by merging duplicate blocks
 .IP deduped
 Blocks required after dedupe
 .IP compressed
-Capacity after compressing blocks
+Capacity after compressing (deduped) blocks i.e.sum of compressed size of all blocks after dedupe
 .IP allocated
-Capacity after allocating compressed blocks into buckets
+Capacity after allocating compressed blocks into buckets. This is the required capacity on an inline dedupe/compress capable storage array
 .IP compressed\ raw
-Capacity required for compressing all raw data (ignoring dedupe and block sizes)
+Capacity required for compressing all raw data (before dedupe) i.e. sum of compressed size of all scanned 
+blocks (before dedupe) - comparable to compression as a stream, such as backup
 .IP unique\ data
 Blocks that are unique (cannot be deduped)
 .IP non-unique\ data
@@ -105,6 +118,12 @@ capacity used divided by deduped
 capacity deduped divided by allocated
 .IP thin\ ratio
 capacity used divided by total
+.IP combined
+Overall data reduction (dedupe ratio * compress ratio * thin ratio)
+.IP raw\ capacity
+equal to total
+.IP net\ capacity
+equal to allocated
 .P
 .SH RESOURCE REQUIREMENTS
 .B Storage capacity
@@ -122,11 +141,19 @@ the staging table is then 67108864 * 21 = 1,409,286,144 bytes = 1344 MiB (not in
 So at 16K blocksize the database capacity for scanning is roughly 0.11% of the data size.
 .P
 After scanning the primary database will be updated from the staging database (merge process). During merge the required capacity is double
-the size or 0.22% for both databases, however, SQLite also creates hidden temporary tables which require another 0.11%.
+the size or 0.22% for both databases, however, SQLite also creates hidden temporary tables which require another 0.22%.
 .P
-A safe assumption for reserved space for qdda is 8% of data size divided by the blocksize in kb.
+Summary for a 1TiB random dataset:
 .br
-So 1TiB data (1024GB) at 16K blocksize requires 1024*0.08/16 = 5.12 GB
+Primary database - 1400MiB (will be smaller if the data has zero blocks or can be deduped)
+.br
+Staging database - 1400MiB (deleted after merging)
+.br
+Temp tables      - 2800MiB (hidden, deleted after merging)
+.br
+Total            - 5600MiB (file system free space required, or 0.56%)
+.P
+A (very) safe assumption for reserved space for qdda is 1% of data size for a blocksize of 16kb.
 .br
 After merging the data, the staging database is deleted and the database size is about 0.12% of the original data size (at 16K blocksize).
 .P
@@ -134,7 +161,7 @@ After merging the data, the staging database is deleted and the database size is
 .br
 Primary database: $HOME/qdda.db
 .br
-Staging database: /var/tmp/qdda-staging.db
+Staging database: $HOME/qdda-staging.db
 .br
 Temp storage: /var/tmp
 .P
@@ -291,6 +318,8 @@ source host: (as root) cat /dev/<disk> | nc targethost 19000
 
 .SH FILES
 .SH KNOWN ISSUES
+Database journaling and synchronous mode are disabled for performance reasons. This means the database may be corrupted if qdda is ended
+in an abnormal way (killed, file system full, etc).
 .SH SEE ALSO
 lz4(1), dgst(1), sqlite3(1)
 .SH AUTHOR

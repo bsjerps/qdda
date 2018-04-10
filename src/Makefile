@@ -12,10 +12,10 @@ sysconfdir = /etc
 CXXFLAGS  += -std=c++0x
 CFLAGS    += -O3
 LIBS       = -lpthread -lstdc++ -ldl
-STATIC     = /usr/lib64/liblz4.a
+STATIC     = lib/liblz4.a
 
 # disable for prod version
-CXXFLAGS  += -D__DEBUG
+# CXXFLAGS  += -D__DEBUG
 
 all: qdda
 

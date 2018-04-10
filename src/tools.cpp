@@ -128,6 +128,12 @@ const string& homeDir() {
   return homedir;
 }
 
+const string dirName(const string& in) {
+  string dir;
+  dir = in.substr(0,in.find_last_of("/")) + "/";
+  return dir;  
+}
+
 // get filesystem free in MiB
 long fileSystemFree(const char* path) {
   struct statvfs stat;
@@ -267,8 +273,9 @@ int LongOptions::parse(int argc, char** argv) {
 
 // Signal Handler for SIGINT (i.e. ctrl-c)
 void setabort(int sig_num) {
-  signal(SIGINT, setabort);
+  // signal(SIGINT, setabort); // no rearm
   g_abort = true;  
+  resetTrap();
 }
 
 void armTrap() {
