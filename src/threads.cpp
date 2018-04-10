@@ -119,15 +119,15 @@ void RingBuffer::clear(size_t ix) {
   mx_buffer[ix].unlock();
 }
 
-bool RingBuffer::cmpheadtail() {
+bool RingBuffer::isFull() {
   bool ret;
   mx_meta.lock();
-  ret = head == tail;
+  ret = ((head+1) % size) == tail;
   mx_meta.unlock();
   return ret;
 }
 
-bool RingBuffer::cmpworkhead() {
+bool RingBuffer::workDone() {
   bool ret;
   mx_meta.lock();
   ret = work == head;
@@ -135,7 +135,7 @@ bool RingBuffer::cmpworkhead() {
   return ret;
 }
 
-bool RingBuffer::cmptailwork() {
+bool RingBuffer::isEmpty() {
   bool ret;
   mx_meta.lock();
   ret = tail == work;
@@ -148,14 +148,19 @@ int RingBuffer::getfree(size_t& ix) {
   if(g_abort) return 2;
   headbusy.lock();
   ix = head;
-  mx_buffer[ix].lock();
-  head = ++head % size; // move head to the next  
-  while (cmpheadtail()) {
+  while (isFull()) {
     usleep(10000);
-    if(g_abort) { rc = 2; break; }
+    if(done || g_abort) { 
+      rc = 1; 
+      break; 
+    }
   }
+  head = ++head % size; // move head to the next  
+  mx_buffer[ix].lock();
+  if(rc)
+    mx_buffer[ix].unlock();
   headbusy.unlock();
-  return 0;
+  return rc;
 }
 
 int RingBuffer::getfull(size_t& ix) {
@@ -163,17 +168,17 @@ int RingBuffer::getfull(size_t& ix) {
   if(g_abort) return 2;
   workbusy.lock();
   ix = work;
-  if(done && cmpworkhead()) {
-    workbusy.unlock();
-    return 1;
-  }
-  mx_buffer[ix].lock();
-  work = ++work % size;  // move ptr to next
-  while(cmpworkhead()) {
+  while(workDone()) {
     usleep(10000);
-    if(done) break;
-    if(g_abort) { rc = 2; break; }
+    if(done || g_abort) { 
+      rc = 1;
+      break; 
+    }
   }
+  work = ++work % size;  // move ptr to next
+  mx_buffer[ix].lock();
+  if(rc)
+    mx_buffer[ix].unlock();
   workbusy.unlock();
   return rc;
 }
@@ -183,17 +188,17 @@ int RingBuffer::getused(size_t& ix) {
   if(g_abort) return 2;
   tailbusy.lock();
   ix = tail;
-  if(done && cmptailwork()) {
-    tailbusy.unlock();
-    return 1;
-  }
-  mx_buffer[ix].lock();  
-  tail = ++tail % size;  // we need the next
-  while (cmptailwork()) {
+  while (isEmpty()) {
     usleep(10000);
-    if(done) break;
-    if(g_abort) { rc = 2; break; };
+    if(done || g_abort) { 
+      rc = 1;
+      break;
+    }
   }
+  tail = ++tail % size;  // we need the next
+  mx_buffer[ix].lock();  
+  if(rc)
+    mx_buffer[ix].unlock();
   tailbusy.unlock();
   return rc;
 }
@@ -240,7 +245,6 @@ ulong readstream(int thread, SharedData& shared, FileData& fd) {
     shared.v_databuffer[i].used = blocks;
 
     shared.rb.clear(i);
-    
     if(fd.limit_mb && totbytes >= fd.limit_mb*1048576) break; // end if we only read a partial file
   }
   fd.ifs->close();

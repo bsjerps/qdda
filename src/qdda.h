@@ -47,7 +47,7 @@ public:
   FileData(const string& name);
   std::ifstream* ifs;
   string filename;
-  int limit_mb;
+  ulong limit_mb;
 };
 
 // Parameter set to pass between functions

@@ -70,9 +70,9 @@ public:
   bool done;
   size_t getsize() { return size;} 
 private:
-  bool cmpheadtail();
-  bool cmpworkhead();
-  bool cmptailwork();
+  bool isFull();
+  bool workDone();
+  bool isEmpty();
   Mutex mx_meta;
   Mutex tailbusy;
   Mutex headbusy;
