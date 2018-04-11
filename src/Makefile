@@ -12,10 +12,10 @@ sysconfdir = /etc
 CXXFLAGS  += -std=c++0x
 CFLAGS    += -O3
 LIBS       = -lpthread -lstdc++ -ldl
-STATIC     = lib/liblz4.a
+# STATIC     = lib/liblz4.a
 
 # disable for prod version
-# CXXFLAGS  += -D__DEBUG
+CXXFLAGS  += -D__DEBUG
 
 all: qdda
 
@@ -24,9 +24,10 @@ all: qdda
 # Note that building on newer systems causes problems with
 # older versions of LIBC and STDC++ libraries.
 # LZ4 needs to be version 1.31 (or higher).
+# contrib/lz4.o
 
-qdda: qdda.o database.o tools.o output.o threads.o helptext.o contrib/sqlite3.o contrib/md5.o 
-	g++ $(LDFLAGS) qdda.o contrib/md5.o database.o tools.o helptext.o threads.o output.o contrib/sqlite3.o $(LIBS) $(STATIC) -o qdda 
+qdda: qdda.o database.o tools.o output.o threads.o helptext.o contrib/sqlite3.o contrib/md5.o contrib/lz4.o
+	g++ $(LDFLAGS) qdda.o contrib/md5.o database.o tools.o helptext.o threads.o output.o contrib/sqlite3.o contrib/lz4.o $(LIBS) $(STATIC) -o qdda 
 
 qdda.o: qdda.cpp tools.h qdda.h database.h
 	g++ -c $(CXXFLAGS) $(CFLAGS) qdda.cpp
@@ -56,7 +57,7 @@ clean:
 	rm -rf *.o qdda
 
 allclean:
-	rm -rf *.o */*.o qdda
+	rm -rf *.o */*.o */*.a qdda
 
 install: qdda
 	install -d 0755 $(prefix)/bin

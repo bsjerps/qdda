@@ -327,13 +327,12 @@ void dbtest(QddaDB& db, Parameters& p) {
 }
 
 // test hashing, compression and insert performance
-void cputest(QddaDB& db) {
+void cputest(QddaDB& db, Parameters& p) {
+ 
+  StagingDB::createdb(p.stagingname,db.blocksize);
+  StagingDB stagingdb(p.stagingname);
   
-  const char* tmpname = "/var/tmp/staging-test.db";
-  StagingDB::createdb(tmpname,db.blocksize);
-  StagingDB stagingdb(tmpname);
-  
-  const ulong mib       = 1024; // 1024; // size of test set
+  const ulong mib       = 2048; // size of test set
   const ulong blocksize = db.blocksize;
 
   const ulong rows      = mib * 1024 / blocksize;
@@ -364,13 +363,14 @@ void cputest(QddaDB& db) {
 
   cout << "Compressing: " << flush;
   stopwatch.reset();
+  
   for(ulong i=0;i<rows;i++) compress(testdata + i*blocksize*1024,buf,blocksize*1024);
   time_compress = stopwatch.lap(); time_total += time_compress;
   cout << setw(15) << time_compress << " usec, " 
        << setw(10) << (float)bufsize/time_compress << " MB/s, " 
        << setw(11) << float(rows)*1000000/time_compress << " rows/s"
        << endl;
-  
+
   // test sqlite insert performance
   cout << "DB insert:   " << flush;
   stopwatch.reset();
@@ -388,7 +388,7 @@ void cputest(QddaDB& db) {
   // time_total = time_hash + time_compress + time_insert;
   cout << "Total:       " << setw(15) << time_total    << " usec, " << setw(10) << (float)bufsize/time_total    << " MB/s" << endl;
   delete[] testdata;
-  Database::deletedb(tmpname);
+  Database::deletedb(p.stagingname);
 }
 
 
@@ -561,7 +561,7 @@ int main(int argc, char** argv) {
 
   if(p.do_purge)             { db.vacuum();           }
   else if(!p.import.empty()) { import(db,p.import);   }
-  else if(p.do_cputest)      { cputest(db) ;          } 
+  else if(p.do_cputest)      { cputest(db,p) ;        } 
   else if(p.testopts.size()) { dbtest(db, p);         }
   else if(p.searchhash!=0)   { findhash(p);           }
   else if(p.tophash!=0)      { tophash(db,p.tophash); }
