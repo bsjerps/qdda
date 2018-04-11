@@ -24,7 +24,6 @@ all: qdda
 # Note that building on newer systems causes problems with
 # older versions of LIBC and STDC++ libraries.
 # LZ4 needs to be version 1.31 (or higher).
-# contrib/lz4.o
 
 qdda: qdda.o database.o tools.o output.o threads.o helptext.o contrib/sqlite3.o contrib/md5.o contrib/lz4.o
 	g++ $(LDFLAGS) qdda.o contrib/md5.o database.o tools.o helptext.o threads.o output.o contrib/sqlite3.o contrib/lz4.o $(LIBS) $(STATIC) -o qdda 
@@ -34,6 +33,9 @@ qdda.o: qdda.cpp tools.h qdda.h database.h
 
 database.o: database.cpp tools.h qdda.h database.h
 	g++ -c $(CXXFLAGS) $(CFLAGS) database.cpp
+
+lz4.o: contrib/lz4.c contrib/lz4.h
+	g++ -c $(CFLAGS) lz4.c
 
 md5.o: contrib/md5.c contrib/md5.h
 	g++ -c $(CFLAGS) md5.c
