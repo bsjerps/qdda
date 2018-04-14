@@ -101,7 +101,7 @@ thin ratio          =        1.14
 combined            =        2.99
 raw capacity        =    16384.00 MiB
 net capacity        =     5485.09 MiB
-..fi
+.fi
 .PP
 .P
 .B Explanation
@@ -153,9 +153,7 @@ equal to allocated
 Show detailed histograms from the database
 .P
 .B Example output
-.PP
-.in +4n
-.EX
+.nf
 File list:
 file      blksz     blocks         MiB date               url                                                                             
 1         16384      65536        1024 20180414_0532      workstation:/dev/sda                                                            
@@ -194,8 +192,7 @@ size              buckets       blocks          MiB
 15                   1957         1835        28.67
 16                  14629        14629       228.58
 Total:              49524        33095       517.11
-.EE
-.in
+.fi
 .P
 .B Explanation
 .P
@@ -229,17 +226,14 @@ into 1K buckets. The array has a blocksize of 16K so in order to store 1006 1K b
 Shows the 5 most common hash values in the database. Note that these are the 60-bit truncated MD5 hashes of each block.
 .P
 .B Example output
-.PP
-.in +4n
-.EX
+.nf
 hash                 blocks    
 452707908990536042   402       
 110182122676868616   146       
 356086100205023294   16        
 918237101795036785   9         
 941619753194353532   9      
-.EE
-.in
+.fi
 .P
 .B Explanation
 .P
@@ -250,36 +244,31 @@ the offsets:
 .P
 sqlite3 qdda-staging.db "select * from offsets where hash=110182122676868616 limit 2"
 .br
-.in +4n
-.EX
+.nf
 hash                hexhash             offset      bytes     
 ------------------  ------------------  ----------  ----------
 110182122676868616  0x0187720e8ac0d608  181         2965504   
 110182122676868616  0x0187720e8ac0d608  182         2981888   
-.EE
-.in
+.fi
 .P
 We see that the hash appears on block offsets 181 and 182 (and 144 more but we limit the query to the first 2).
 We can hexdump the contents of this particular block to see what's in there:
 .P
 dd bs=16K status=none count=1 if=/dev/sda skip=181 | hexdump -Cv|head
 .P
-.in +4n
-.EX
+.nf
 00000000  ff ff ff ff ff ff ff ff  ff ff ff ff ff ff ff ff  |................|
 00000010  ff ff ff ff ff ff ff ff  ff ff ff ff ff ff ff ff  |................|
 00000020  ff ff ff ff ff ff ff ff  ff ff ff ff ff ff ff ff  |................|
 00000030  ff ff ff ff ff ff ff ff  ff ff ff ff ff ff ff ff  |................|
 etc...
-.EE
-.in
+.fi
 We can verify the MD5 hash:
 .P
 dd bs=16K status=none count=1 if=/dev/sda skip=181 | md5sum 
 .P
 92ab673d915a94dcf187720e8ac0d608  -
-                 ---------------
-Note that the last 15 hex digits (equal to 60 bits) match the hexadecimal hash value in the database.
+                 |-------------|> Note that the last 15 hex digits (equal to 60 bits) match the hexadecimal hash value in the database.
 
 
 .SH RESOURCE REQUIREMENTS
