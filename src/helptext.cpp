@@ -12,7 +12,14 @@ const char* manpage_head = R"(.TH qdda 1 "2018-03-24" "QDDA" "QDDA User Manual"
 .SH NAME
 qdda \- the quick & dirty dedupe analyzer
 .SH SYNOPSIS
-.B qdda <options> [FILE]...
+.B qdda <options> [FILE...]
+.P
+FILE is usually a disk device such as /dev/sda but can also be a flat file, a named pipe, a disk partition or anything else that can be
+read as a stream. It will also read from stdin if it is not connected to a tty, i.e. you can do 'cat <file> | qdda '.
+.br
+Each file can have a modifier by adding a colon (:) and a value. Currently the value is the maximum amount of mibibytes to read from the
+stream: /dev/sda:1024 will read the first 1024MiB and then stop.
+
 .SH DESCRIPTION
 .B qdda
 checks files, data streams or block devices for duplicate blocks to estimate deduplication
@@ -37,6 +44,27 @@ section for details on how to do this.
 )";
 
 const char* manpage_body = R"(
+.P
+Array definition:
+.br
+Currently qdda supports XtremIO x1, XtremIO x2 and VMAX AFA compression types. The compress and hash algorithms are different from
+these actual arrays and the results are a (close) approximation of the real array data reduction.
+Currently the definitions are as follows:
+.P
+.TP 12
+.B x1
+XtremIO X1: Blocksize 8K, bucket sizes 2K, 4K and 8K, compression LZ4-default
+.TP
+.B x2
+XtremIO X2: Blocksize 16K, bucket sizes 1,2,3,4,5,6,7,8,9,10,11,12,13,15 and 16K, compression LZ4-default
+.TP
+.B vmax1
+VMAX\ AFA v1: Blocksize 128K, bucket sizes 8,16,24,32,40,48,56,64,72,80,88,96,104,112,120 and 128K, compression LZ4-default (experimental)
+.TP
+.B custom
+Specify a string with array=name=<name>,bs=<blocksize_kb>,buckets=<bucketsize1+bucketsize2....>
+
+
 .SH EXAMPLE
 .TP 
 .B qdda /dev/sda
@@ -125,6 +153,139 @@ equal to total
 .IP net\ capacity
 equal to allocated
 .P
+.B qdda --detail
+Show detailed histograms from the database
+.P
+.B Example output
+.PP
+.in +4n
+.EX
+File list:
+file      blksz     blocks         MiB date               url                                                                             
+1         16384      65536        1024 20180414_0532      workstation:/dev/sda                                                            
+
+Dedupe histogram:
+dup                blocks              bytes          MiB
+0                   10804          177012736       168.81
+1                   45075          738508800       704.30
+2                    8558          140214272       133.72
+3                     465            7618560         7.27
+4                      20             327680         0.31
+5                      10             163840         0.16
+6                       6              98304         0.09
+8                      16             262144         0.25
+9                      18             294912         0.28
+16                     16             262144         0.25
+146                   146            2392064         2.28
+402                   402            6586368         6.28
+Total:              65536         1073741824      1024.00
+
+Compression Histogram (0): 
+size              buckets       blocks          MiB
+1                    1006           63         0.98
+2                    1293          162         2.53
+3                    1902          357         5.58
+4                    2185          547         8.55
+5                    1989          622         9.72
+6                    2445          917        14.33
+7                    2508         1098        17.16
+8                    2772         1386        21.66
+9                    3061         1722        26.91
+10                   3864         2415        37.73
+11                   3919         2695        42.11
+12                   3576         2682        41.91
+13                   2418         1965        30.70
+15                   1957         1835        28.67
+16                  14629        14629       228.58
+Total:              49524        33095       517.11
+.EE
+.in
+.P
+.B Explanation
+.P
+.B File\ list
+shows info on the files that were scanned.
+.P
+.B Dedupe\ histogram
+.P
+shows the distribution of duplicate counts of the scanned blocks. The first row (0) is a special case and shows
+how many blocks were blank (zeroed). Each other row shows dupcount (how many copies of each block were found), the amount of blocks,
+the amount of bytes (blocks * blocksize), and Mibibytes. For example, the row with dupcount 4 has 20 blocks which means qdda
+found 4 blocks to be the same (dupcount 4), and 4 other blocks being the same and so on with a total of 20 blocks 
+(5 sets of 4 similar blocks).
+The row with dup=1 means these are unique blocks in the dataset. A very high dupcount usually is the result of some special blocks such as 
+filled with ones (0xFFFFFFFF...) or other metadata padding blocks.
+.P
+.B Compression\ histogram
+.P
+qdda will calculate the compressed size for each (deduped) block and sort it into 1KiB multiples. Then it will sort the amounts into
+the defined bucket sizes for the array. For example XtremIO X1 has bucket sizes 2K,4K, 8K. A block with a compressed size between 1 and
+2048 bytes will go into the 2K bucket, sizes between 2049 and 4096 will go into bucket 4K and everything else into 8K.
+.br
+The compression histogram shows the distribution of bucket sizes. In this case for XtremIO X2 it shows that 1006 blocks were compressed
+into 1K buckets. The array has a blocksize of 16K so in order to store 1006 1K buckets we need 63 blocks (1006*1/16).
+.br
+2772 blocks were compressed into the 8K bucket, and this requires 1098 blocks to be allocated (2772*8/16).
+.br 14629 blocks could not be compressed in less than 16K so these are stored 1:1.
+.P
+.B qdda --tophash 5
+.P
+Shows the 5 most common hash values in the database. Note that these are the 60-bit truncated MD5 hashes of each block.
+.P
+.B Example output
+.PP
+.in +4n
+.EX
+hash                 blocks    
+452707908990536042   402       
+110182122676868616   146       
+356086100205023294   16        
+918237101795036785   9         
+941619753194353532   9      
+.EE
+.in
+.P
+.B Explanation
+.P
+We see that 452707908990536042 is the most common hash in the database with a dupcount of 402. To find out what the contents are of a
+block that has this hash value, we can scan the data again but keep the staging database with the --nomerge option
+as the staging database keeps all the offsets of the block hashes (if we only scan one file). We can then query the staging database for
+the offsets:
+.P
+sqlite3 qdda-staging.db "select * from offsets where hash=110182122676868616 limit 2"
+.br
+.in +4n
+.EX
+hash                hexhash             offset      bytes     
+------------------  ------------------  ----------  ----------
+110182122676868616  0x0187720e8ac0d608  181         2965504   
+110182122676868616  0x0187720e8ac0d608  182         2981888   
+.EE
+.in
+.P
+We see that the hash appears on block offsets 181 and 182 (and 144 more but we limit the query to the first 2).
+We can hexdump the contents of this particular block to see what's in there:
+.P
+dd bs=16K status=none count=1 if=/dev/sda skip=181 | hexdump -Cv|head
+.P
+.in +4n
+.EX
+00000000  ff ff ff ff ff ff ff ff  ff ff ff ff ff ff ff ff  |................|
+00000010  ff ff ff ff ff ff ff ff  ff ff ff ff ff ff ff ff  |................|
+00000020  ff ff ff ff ff ff ff ff  ff ff ff ff ff ff ff ff  |................|
+00000030  ff ff ff ff ff ff ff ff  ff ff ff ff ff ff ff ff  |................|
+etc...
+.EE
+.in
+We can verify the MD5 hash:
+.P
+dd bs=16K status=none count=1 if=/dev/sda skip=181 | md5sum 
+.P
+92ab673d915a94dcf187720e8ac0d608  -
+                 ---------------
+Note that the last 15 hex digits (equal to 60 bits) match the hexadecimal hash value in the database.
+
+
 .SH RESOURCE REQUIREMENTS
 .B Storage capacity
 .P
@@ -217,7 +378,7 @@ List available methods using option '-c l'
 .P
 .B Throttling:
 
-qdda processes a number of blocks per cycle (usually 64) and measures the service time. 
+qdda processes a number of blocks per read IO and measures the service time. 
 If the service time is too low it means the throughput is
 higher than the bandwidth limit. The CPU is put to sleep for a number of microseconds to match the overall bandwidth limit.
 This prevents accidentally starving IO on a production host. Disable with '-b 0' option or set different bandwidth
@@ -269,8 +430,53 @@ Some arrays do post-processing which also results in not all data being compress
 .B qdda
 currently ignores these effects and produces results for all data as if it was compressed and deduped.
 
+.SH PERFORMANCE
+.B qdda
+is multi-threaded during disk scans so the read process can go as fast as possible while the worker processes handle the compression and
+hashing calculations. An updater process is dedicated to update the SQLite staging database.
+.br
+Giving accurate numbers for performance is almost impossible due to differences in IO speed, CPU power and other factors. You can get
+a rough idea of your system's capabilities by running the --cputest option which gives the estimates for a single thread:
+.PP
+.in +4n
+.EX
+*** Synthetic performance test, 1 thread ***
+Initializing:          65536 blocks, 16k (1024 MiB)
+Hashing:             1799584 usec,     596.66 MB/s,    36417.30 rows/s
+Compressing:         2412561 usec,     445.06 MB/s,    27164.49 rows/s
+DB insert:             52301 usec,   20530.04 MB/s,  1253054.38 rows/s
+.EE
+.in
+.P
+The overview shows how fast a single core can hash, compress and update a dataset of the given size (this is on an
+Intel Core i5-4440 CPU @ 3.10GHz). The reference dataset is a random(ish) block of data and the numbers are an indication only. 
+Note that the compress rate is inaccurate but repeatable. A real dataset is usually less random and may show higher or lower speeds.
+.P
+A data scan by default will allocate 1 thread per file, 1 thread for database updates and the number of worker threads equal to the
+amount of cpu cures. Experience shows that the bottleneck is usually read IO bandwidth until the database updater is maxed out (on a 
+fast reference system this happened at about 3000MB/s). Future versions may use multiple updater threads to avoid this bottleneck.
+.P
+After data scan the staging data has to be merged with the primary database. This is done by joining existing data with staging data
+and running an 'insert or replace' job in SQLite. Testing the speed can be done with the --dbtest option. Output of a merge of
+1TB data @16K on i5-4440 CPU @ 3.10GHz:
+.PP
+.in +4n
+.EX
+Merging 67108864 blocks (1048576 MiB) with 0 blocks (0 MiB) in 157.28 sec (426686 blocks/s, 6666 MiB/s)
+.EE
+.in
+.P
+Tuning - You may speed up I/O by altering the default database location from $HOME/qdda.db to another path with the '-d' option,
+to a faster file system (such as SSD based). You can also set the SQLite TEMP dir to an alternative location with
+ '--tmpdir' or setting SQLITE_TMPDIR (also helps if you run out of diskspace).
+.br
+You can avoid the merge (join) phase and delay it to a later moment using the "--nomerge" (no report) option. 
+Ideal if you scan on a slow server with limited space and you want to do the heavy lifting on a faster host later.
+
+
+
 .SH CONFIG FILES
-None.
+None, everything is contained in the SQLite database and command line options
 .SH ENVIRONMENT VARIABLES
 .IP SQLITE_TMPDIR
 .br
@@ -279,7 +485,6 @@ if set, is used for the temporary tables such as used for sorting and joining
 .IP TMPDIR
 .br
 if SQLITE_TMPDIR is not set, TMPDIR is used for temp tables
-.SH BEHAVIOUR
 .SH SECURITY AND SAFETY
 For added safety you may run qdda as a non-privileged user. Non-root users usually do not have access to block devices.
 To run QDDA in a safe way, there are various methods (assuming the "qdda" user without root privileges) you need to provide read
@@ -295,10 +500,12 @@ Changing the group/permissions on /dev/<disk> is problematic as it either gives 
 for other applications such as Oracle ASM. 
 .br
 The best solution I have found is to use extended ACLs on Linux:
+.PP
 .br
 .EX
-setfacl -m u:qdda:r /dev/<disk>
+setfacl -m u:<user>:r /dev/<disk>
 .EE
+.PP
 .br
 This gives qdda read-only access without altering any of the existing ownerships/permissions. The permissions will be reset at next reboot.
 You need to have ACL enabled on the root file system (holding /dev/) and the setfacl tool installed (RPM package acl).
@@ -307,81 +514,43 @@ You need to have ACL enabled on the root file system (holding /dev/) and the set
 .B qdda
 currently only runs on 64-bit linux. Disks from other platforms can be processed by using qdda over a named or unnamed pipe.
 .br
-The simple way:
-
-Run qdda over a network pipe:
-
 You can do this using netcat (nc)
 
-target host: (as qdda) nc -l 19000 | qdda
-source host: (as root) cat /dev/<disk> | nc targethost 19000
+target host: (as qdda)
+.br
+nc -l 19000 | qdda
+.br
+source host: (as root) 
+.br
+cat /dev/<disk> | nc targethost 19000
+.P
 
-.SH FILES
 .SH KNOWN ISSUES
 Database journaling and synchronous mode are disabled for performance reasons. This means the database may be corrupted if qdda is ended
 in an abnormal way (killed, file system full, etc).
 .SH SEE ALSO
-lz4(1), dgst(1), sqlite3(1)
+lz4(1), md5(1), sqlite3(1), mkfifo(1), nc(1)
 .SH AUTHOR
-Compiled by Bart Sjerps - contact me via my blog "Dirty Cache" - \fIhttp://bartsjerps.wordpress.com\fR
+Written by Bart Sjerps \fIhttp://bartsjerps.wordpress.com\fR
 .br
 If you have suggestions for improvements in this tool, please send them
 along via the above address.
 .SH COPYRIGHT
-This software is Open Source and may be distributed "as is", modified, reproduced
-and passed to others under the GPLv3 license - \fIhttp://www.gnu.org/licenses/gpl-3.0.txt\fR
+Copyright © 2018 Bart Sjerps,  License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>.
+.br
+This is free software: you are free to change and redistribute it.  There is NO WARRANTY, to the extent permitted by law.
+
 .SH DISCLAIMER
-This software is provided "as is" and because it is mostly based
-on CentOS linux, it follows the licensing and warranty guidelines 
+This software is provided "as is" and follows the licensing and warranty guidelines 
 of the GPL. In normal language that means I will not be held 
 responsible for any problems you may encounter with this software.
-
 )";
 
 const char* qdda_longhelp = R"(
-If you need more space than available, you can change the locations of the files:
-
-- Primary database with -f option (choose a filename for the database)
-- Staging database and hidden directories with -T option (choose a temp directory)
-
-Performance:
-
-QDDA is mostly single threaded. The limit for reading data is defined by the CPU time it takes to calculate hashes and compression
-sizes for each block, and insert speeds. Test scan speeds with the '-t 0' option. On my Intel i5-4440 I get a synthetic 
-speed of about 500MB/s. During real scanning this drops to about 350 MB/s (due to the overhead of really reading data).
-
-Merge performance - the database internally has to count, sort and join a lot of rows (each block is a row in the staging database).
-Performance depends on CPU and I/O speed. Test the merging speed with the '-t size_gb' option. On my system the merge performance
-is (for 16K blocksize on empty database, 2 threads):
-
-Size (GB) Indexing(s)  Index(MB/s) Joining(s) Join(MB/s)
-        2        0.08        27170       0.16      12931
-       16        0.77        21251       1.35      12099
-       64        3.71        17654       5.56      11781
-      128       19.81        13230      23.57      11121
-     1024       53.52        19592      98.39      10657
-
-Tuning:
-
-You may speed up I/O by altering the default database location from /var/tmp/qdda.db to another path with '-f',
-on a faster file system (such as SSD based). 
-You can also set the SQLite TEMP dir to an alternative location with -T (also if you run out of diskspace).
-
-You can avoid the merge (join/sort) phase and delay it to a later moment using the "-r" (no report) option. 
-Ideal if you scan on a slow server with limited space and you want to do the heavy lifting on a faster host later.
-
-Merging datasets:
-
-You may want to scan data and analyze dedupe ratios across different hosts. You can scan each host separately and then later combine
-the databases by using the import option (add data of 2nd database to the primary). The block sizes of both databases should match.
 
 Adding new streams/files to an existing database:
 
 Use the "-a" (append) option to avoid overwriting (deleting) the existing database.
-
-Dump: if you want to find out why certain blocks will or will not duplicate against each other, you can run the Dump (-d) option.
-Beware that this slows down the scan process significantly because every block hash and compressed size will be listed to the console.
-Ideally you should only use this for small size test scenarios.
 
 Extended reports:
 

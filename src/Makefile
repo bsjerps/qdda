@@ -8,14 +8,17 @@
 
 prefix     = /usr/local
 sysconfdir = /etc
+version    = 2.0.0
 
 CXXFLAGS  += -std=c++0x
 CFLAGS    += -O3
 LIBS       = -lpthread -lstdc++ -ldl
-# STATIC     = lib/liblz4.a
+OBJECTS    = sqlite/sqlite3.o
+OBJECTS   += md5/md5.o
+OBJECTS   += lz4/lz4.o
 
 # disable for prod version
-CXXFLAGS  += -D__DEBUG
+# CXXFLAGS  += -D__DEBUG
 
 all: qdda
 
@@ -25,8 +28,10 @@ all: qdda
 # older versions of LIBC and STDC++ libraries.
 # LZ4 needs to be version 1.31 (or higher).
 
-qdda: qdda.o database.o tools.o output.o threads.o helptext.o contrib/sqlite3.o contrib/md5.o contrib/lz4.o
-	g++ $(LDFLAGS) qdda.o contrib/md5.o database.o tools.o helptext.o threads.o output.o contrib/sqlite3.o contrib/lz4.o $(LIBS) $(STATIC) -o qdda 
+#sqlite/sqlite3.o md5/md5.o lz4/lz4.o lzdatagen/lzdatagen.o
+
+qdda: qdda.o database.o tools.o output.o threads.o helptext.o $(OBJECTS)
+	g++ $(LDFLAGS) qdda.o database.o tools.o helptext.o threads.o output.o $(OBJECTS) $(LIBS) $(STATIC) -o qdda 
 
 qdda.o: qdda.cpp tools.h qdda.h database.h
 	g++ -c $(CXXFLAGS) $(CFLAGS) qdda.cpp
@@ -34,13 +39,13 @@ qdda.o: qdda.cpp tools.h qdda.h database.h
 database.o: database.cpp tools.h qdda.h database.h
 	g++ -c $(CXXFLAGS) $(CFLAGS) database.cpp
 
-lz4.o: contrib/lz4.c contrib/lz4.h
+lz4.o: lz4/lz4.c lz4/lz4.h
 	g++ -c $(CFLAGS) lz4.c
 
-md5.o: contrib/md5.c contrib/md5.h
+md5.o: md5/md5.c md5/md5.h
 	g++ -c $(CFLAGS) md5.c
 
-sqlite3.o: contrib/sqlite3.c contrib/sqlite3.h
+sqlite3.o: sqlite/sqlite3.c sqlite/sqlite3.h
 	g++ -c $(CFLAGS) sqlite3.c
 
 tools.o: tools.cpp tools.h
@@ -58,14 +63,17 @@ helptext.o: helptext.cpp
 clean:
 	rm -rf *.o qdda
 
+src:
+	tar -jcvf $(HOME)/qdda-$(version).tbz2 --transform "s|^|qdda/|" *
+
 allclean:
-	rm -rf *.o */*.o */*.a qdda
+	rm -rf *.o */*.o qdda
 
 install: qdda
 	install -d 0755 $(prefix)/bin
 	install -d 0755 $(sysconfdir)/bash_completion.d
 	install -m 0755 qdda $(prefix)/bin
-	install -m 0644 support/qdda.bash $(sysconfdir)/bash_completion.d
+#	install -m 0644 support/qdda.bash $(sysconfdir)/bash_completion.d
 
 .PHONY: install
 

@@ -15,13 +15,18 @@ long threadpid();
 // simple Mutex class
 class Mutex {
 public:
-  Mutex()       { pthread_mutex_init(&mutex,0); }
+  Mutex() {
+    pthread_mutexattr_init (&attr);
+    pthread_mutexattr_setrobust_np (&attr, PTHREAD_MUTEX_ROBUST_NP);
+    pthread_mutex_init (&mutex, &attr);
+  }
   ~Mutex()      { pthread_mutex_destroy(&mutex);}
   void lock()   { pthread_mutex_lock(&mutex);   }
   void unlock() { pthread_mutex_unlock(&mutex); }
   int trylock() { return pthread_mutex_trylock(&mutex); }
 private:
   pthread_mutex_t mutex;
+  pthread_mutexattr_t attr;
 };
 
 // Blockdata holds <blockspercycle> blocks of data from a stream read by the reader
@@ -32,8 +37,6 @@ public:
  ~DataBuffer();
   void  reset();           // clear buffer and temp counters;
   char* operator[](int n); // access to the nth block in the buffer
-  //void  lock() { mutex.lock(); }
-  //void  unlock() { mutex.unlock(); }
 
   ulong bufsize;           // size of the read buffer in bytes
   int   used;              // number of used blocks in the buffer
@@ -43,7 +46,7 @@ public:
   std::vector<ulong> v_hash;
   std::vector<ulong> v_bytes;
   
-  ulong offset;            // offset of the first block
+  //ulong offset;            // offset of the first block
   ulong blocksize_bytes;
 private:
   //Mutex mutex;
@@ -68,15 +71,18 @@ public:
   int getused(size_t& ix);
   void clear(size_t ix);
   bool done;
-  size_t getsize() { return size;} 
+  size_t getsize() { return size;}
+  void print();
 private:
   bool isFull();
-  bool workDone();
+  bool hasData();
   bool isEmpty();
+  bool isDone();
   Mutex mx_meta;
   Mutex tailbusy;
   Mutex headbusy;
   Mutex workbusy;
+  Mutex mx_print;
   std::vector<Mutex> mx_buffer;
   size_t head;
   size_t tail;
@@ -96,14 +102,11 @@ public:
   ulong                   blocksize;
   ulong                   blocks, bytes;
   ulong                   cbytes;
-  ulong                   rsleeps,wsleeps;
   StagingDB*              p_sdb;
   IOThrottle              throttle;
-  Mutex                   mutex_output;
-  Mutex                   mutex_database;
-  Mutex*                  a_mutex_files;
+  Mutex                   mx_output;
+  Mutex*                  filelocks;
   int                     blockspercycle;
 private:
   Mutex                   mutex;
-
 };

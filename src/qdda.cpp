@@ -43,13 +43,13 @@
 #include <pthread.h>
 #include <stdlib.h>     /* srand, rand */
 
-#include "contrib/lz4.h"
+#include "lz4/lz4.h"
 #include "tools.h"
 #include "database.h"
 #include "qdda.h"
 
 extern "C" {
-#include "contrib/md5.h"
+#include "md5/md5.h"
 }
 
 using namespace std;
@@ -60,7 +60,6 @@ using namespace std;
  ******************************************************************************/
 
 const char* PROGVERSION   = "2.0.0" RELEASE;
-//const char* DEFAULT_TMP    = "/var/tmp"; // tmpdir for SQLite temp files
 const ulong DEFAULT_BANDWIDTH = 200;     //
 
 /*******************************************************************************
@@ -71,28 +70,35 @@ bool g_debug = false; // global debug flag
 bool g_query = false; // global query flag
 bool g_quiet = false; // global quiet flag
 bool g_abort = false; // global signal flag - true if ctrl-c was pressed (sigterm)
-ulong    starttime = epoch();  // start time of program
+ulong starttime = epoch(); // start time of program
 
 ofstream c_debug; // Debug stream
 
 FileData::FileData(const string& file) {
-  std::stringstream ss(file);
-  string fname;
-  string sizestr;
-  int maxsize = 0;
-  getline(ss,fname,':');
-  getline(ss,sizestr);
-  if(!sizestr.empty()) maxsize=atoi(sizestr.c_str());
+  ratio=0;
+  stringstream ss(file);
+  string strlimit,strrepeat;
+
+  getline(ss,filename,':');
+  getline(ss,strlimit,',');
+  getline(ss,strrepeat);
+  
+  if(filename=="compress") ratio=1;
+  if(filename=="compress") filename = "/dev/urandom";
+  if(filename=="random") filename = "/dev/urandom";
+  if(filename=="zero") filename = "/dev/zero";
+  
+  limit_mb = atoll(strlimit.c_str());
+  repeat   = atoi(strrepeat.c_str());
+
   ifs = new ifstream;
-  filename = fname;
-  limit_mb = maxsize;
   c_debug << "Opening: " << file << endl;
-  ifs->open(fname);
+  ifs->open(filename);
   if (!ifs->is_open()) {
     string msg = "File open failed, try:\nsudo setfacl -m u:";
     msg += getenv ("USER");
     msg += ":r ";
-    msg += fname;
+    msg += filename;
     msg += "\n";
     die(msg);
   }
@@ -258,7 +264,7 @@ void merge(QddaDB& db, Parameters& parameters) {
       << "Merging " << tmprows << " blocks (" 
       << mib_staging << " MiB) with " 
       << dbrows << " blocks (" 
-      << mib_database << " MiB),\nJoining";
+      << mib_database << " MiB)" << flush;
 
     stopwatch.reset();
     ulong index_rps = tmprows*1000000/stopwatch;
@@ -271,10 +277,10 @@ void merge(QddaDB& db, Parameters& parameters) {
     auto time_merge = stopwatch;
     ulong merge_rps = (tmprows+dbrows)*1000000/time_merge;
     ulong merge_mbps = (mib_staging+mib_database)*1000000/time_merge;
-    if(!g_quiet) cout 
-      << " in " << stopwatch.seconds() << " sec (" 
+    if(!g_quiet) cout << " in "
+      << stopwatch.seconds() << " sec (" 
       << merge_rps << " blocks/s, " 
-      << merge_mbps << " MiB/s)\n";
+      << merge_mbps << " MiB/s)\n" << endl;
   }
   Database::deletedb(parameters.stagingname);
 }
@@ -286,7 +292,7 @@ void merge(QddaDB& db, Parameters& parameters) {
 void dbtest(QddaDB& db, Parameters& p) {
   StagingDB::createdb(p.stagingname,db.blocksize);
   StagingDB stagingdb(p.stagingname);
-
+  Stopwatch stopwatch;
   const ulong blocksize = db.blocksize;
   const ulong rowspergb = square(1024) / blocksize;
   
@@ -317,10 +323,9 @@ void dbtest(QddaDB& db, Parameters& p) {
       cerr << "Cannot parse " << str << endl;
     }
   }
-
-  Stopwatch stopwatch;
-  cout << "Merge test: Loading " << rows << " " << blocksize << "k random blocks (" << rows*blocksize/1024 << " MiB) " << flush;
-
+  cout << "Merge test: Loading " 
+       << rows << " " << blocksize << "k random blocks (" 
+       << rows*blocksize/1024 << " MiB) " << flush;
   stopwatch.lap();
   cout << "in " << stopwatch.seconds() << " s" << endl;
   stagingdb.insertmeta("mergetest", rows, rows*blocksize*1024);
@@ -332,13 +337,15 @@ void cputest(QddaDB& db, Parameters& p) {
   StagingDB::createdb(p.stagingname,db.blocksize);
   StagingDB stagingdb(p.stagingname);
   
-  const ulong mib       = 2048; // size of test set
+  const ulong mib       = 1024; // size of test set
   const ulong blocksize = db.blocksize;
 
   const ulong rows      = mib * 1024 / blocksize;
   const ulong bufsize   = mib * 1024 * 1024;
   char*       testdata  = new char[bufsize];
-  ulong time_hash, time_compress, time_insert, time_total=0;
+  ulong*      hashes    = new ulong[rows];
+  ulong*      bytes     = new ulong[rows];
+  ulong time_hash, time_compress, time_insert;
   char buf[blocksize*1024];
   
   Stopwatch   stopwatch;
@@ -348,13 +355,13 @@ void cputest(QddaDB& db, Parameters& p) {
   cout << "Initializing:" << flush; 
   srand(1);
   memset(testdata,0,bufsize);
-  for(ulong i=0;i<bufsize;i++) testdata[i] = (char)rand() % 256; // fill test buffer with random data
+  for(ulong i=0;i<bufsize;i++) testdata[i] = (char)rand() % 8; // fill test buffer with random(ish) but compressible data
   cout << setw(15) << rows << " blocks, " << blocksize << "k (" << bufsize/1048576 << " MiB)" << endl;
 
   cout << "Hashing:     " << flush;
   stopwatch.reset();
-  for(ulong i=0;i<rows;i++) hash_md5(testdata + i*blocksize*1024,buf,blocksize*1024);
-  time_hash = stopwatch.lap(); time_total += time_hash;
+  for(ulong i=0;i<rows;i++) hashes[i] = hash_md5(testdata + i*blocksize*1024,buf,blocksize*1024);
+  time_hash = stopwatch.lap();
   
   cout << setw(15) << time_hash     << " usec, " 
        << setw(10) << (float)bufsize/time_hash << " MB/s, " 
@@ -364,8 +371,8 @@ void cputest(QddaDB& db, Parameters& p) {
   cout << "Compressing: " << flush;
   stopwatch.reset();
   
-  for(ulong i=0;i<rows;i++) compress(testdata + i*blocksize*1024,buf,blocksize*1024);
-  time_compress = stopwatch.lap(); time_total += time_compress;
+  for(ulong i=0;i<rows;i++) bytes[i] = compress(testdata + i*blocksize*1024,buf,blocksize*1024);
+  time_compress = stopwatch.lap();
   cout << setw(15) << time_compress << " usec, " 
        << setw(10) << (float)bufsize/time_compress << " MB/s, " 
        << setw(11) << float(rows)*1000000/time_compress << " rows/s"
@@ -376,18 +383,17 @@ void cputest(QddaDB& db, Parameters& p) {
   stopwatch.reset();
 
   stagingdb.begin();
-  for(ulong i=0;i<rows;i++) stagingdb.insertdata(i,blocksize);
-  // for(ulong i=0;i<1000000;i++) stagingdb.insertkv(i,blocksize);
+  for(ulong i=0;i<rows;i++) stagingdb.insertdata(hashes[i],bytes[i]);
   stagingdb.end();
-  time_insert = stopwatch.lap(); time_total += time_insert;
+  time_insert = stopwatch.lap();
   cout << setw(15) << time_insert << " usec, "
        << setw(10) << (float)bufsize/time_insert   << " MB/s, "
        << setw(11) << float(rows)*1000000/time_insert << " rows/s"
        << endl;
 
-  // time_total = time_hash + time_compress + time_insert;
-  cout << "Total:       " << setw(15) << time_total    << " usec, " << setw(10) << (float)bufsize/time_total    << " MB/s" << endl;
   delete[] testdata;
+  delete[] hashes;
+  delete[] bytes;
   Database::deletedb(p.stagingname);
 }
 
@@ -471,6 +477,7 @@ string genStagingName(string& name) {
 
 int main(int argc, char** argv) {
   int rc = 0;
+  
   Parameters parameters = {};
   Parameters& p = parameters; // shorthand  
 
@@ -481,23 +488,19 @@ int main(int argc, char** argv) {
   p.workers   = cpuCount();
   p.readers   = 32;
   p.bandwidth = DEFAULT_BANDWIDTH;
-//  p.tmpdir    = DEFAULT_TMP;
   p.array     = "x2";
   
-//  -B <blksize_kb>   : Set blocksize to blksize_kb kilobytes
-
   LongOptions opts;
   opts.add("version"  ,'V', ""             , showversion,  "show version and copyright info");
   opts.add("help"     ,'h', ""             , p.do_help,    "show usage");
   opts.add("man"      ,'m', ""             , manpage,      "show detailed manpage");
   opts.add("db"       ,'d', "<file>"       , p.dbname,     "database file path (default $HOME/qdda.db)");
-  opts.add("create"   , 0 , "<file>"       , p.do_create,  "Create new database");
+  opts.add("append"   ,'a', ""             , p.append,     "Append data instead of deleting database");
   opts.add("delete"   , 0 , ""             , p.do_delete,  "Delete database");
   opts.add("quiet"    ,'q', ""             , g_quiet,      "Don't show progress indicator or intermediate results");
   opts.add("bandwidth",'b', "<mb/s>"       , p.bandwidth,  "Throttle bandwidth in MB/s (default 200, 0=disable)");
-  opts.add("array"    , 0 , "<id|custom>"  , p.array,      "set array <x1|x2|vmax1|custom> - see manpage for info");
+  opts.add("array"    , 0 , "<id|def>"     , p.array,      "set array type or custom definition <x1|x2|vmax1|definition>");
   opts.add("list"     ,'l', ""             , showlist,     "list supported array types and custom definition options");
-  opts.add("append"   ,'a', ""             , p.append,     "Append data instead of deleting database");
   opts.add("detail"   ,'x', ""             , p.detail,     "Detailed report (file info and dedupe/compression histograms)");
   opts.add("dryrun"   ,'n', ""             , p.dryrun,     "skip staging db updates during scan");
   opts.add("purge"    , 0 , ""             , p.do_purge,   "Reclaim unused space in database (sqlite vacuum)");

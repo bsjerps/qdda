@@ -11,7 +11,7 @@
 
 #include <string>
 #include <limits.h>
-#include "contrib/sqlite3.h"
+#include "sqlite/sqlite3.h"
 
 // dirty hack to improve readability
 #define string std::string

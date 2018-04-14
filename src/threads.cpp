@@ -20,17 +20,18 @@
 #include <sys/types.h>
 #include <sys/syscall.h>
 
+// #include "lzdatagen/lzdatagen.h"
 #include "tools.h"
 #include "database.h"
 #include "qdda.h"
 #include "threads.h"
 
 using namespace std;
+
 // dirty hack to improve readability
 // #define string std::string
 
-
-const ulong iosizex = 1024; // kilobytes per IO
+//const ulong iosizex = 1024; // kilobytes per IO
 
 extern bool g_debug;
 extern bool g_quiet;
@@ -70,28 +71,25 @@ void IOThrottle::request(ulong kb) {
 }
 
 SharedData::SharedData(int buffers, int files, ulong blksz, StagingDB* db, int bw): 
-  throttle(bw),
-  rb(buffers)
+  throttle(bw), rb(buffers)
 {
-//  bufsize        = buffers;
   blocksize      = blksz;
-  blockspercycle = (iosizex * 1024) / blocksize / 1024;
+  //blockspercycle = (iosizex * 1024) / blocksize / 1024;
+  blockspercycle = 1024 / blocksize; // read 1MiB per IO
   blocks         = 0;
   bytes          = 0;
   cbytes         = 0;
-  rsleeps        = 0;
-  wsleeps        = 0;
   p_sdb          = db;
   v_databuffer.reserve(buffers);
   for(int i=0;i<buffers;i++) {
     DataBuffer* d = new DataBuffer(blocksize, blockspercycle);
     v_databuffer.push_back(*d);
   }
-  a_mutex_files = new Mutex[files];
+  filelocks = new Mutex[files];
 }
 
 SharedData::~SharedData() {
-  delete[] a_mutex_files;
+  delete[] filelocks;
 }
 
 //int SharedData::size() { return bufsize; }
@@ -119,6 +117,15 @@ void RingBuffer::clear(size_t ix) {
   mx_buffer[ix].unlock();
 }
 
+void RingBuffer::print() {
+  return;
+  mx_print.lock();
+  cout <<  "T" << setw(4) << tail 
+       << " W" << setw(4) << work 
+       << " H" << setw(4) << head
+       << endl << flush;
+  mx_print.unlock();
+}
 bool RingBuffer::isFull() {
   bool ret;
   mx_meta.lock();
@@ -127,10 +134,10 @@ bool RingBuffer::isFull() {
   return ret;
 }
 
-bool RingBuffer::workDone() {
+bool RingBuffer::hasData() {
   bool ret;
   mx_meta.lock();
-  ret = work == head;
+  ret = work != head;
   mx_meta.unlock();
   return ret;
 }
@@ -143,6 +150,17 @@ bool RingBuffer::isEmpty() {
   return ret;
 }
 
+bool RingBuffer::isDone() {
+  bool ret = false;
+  mx_meta.lock();
+  if(done) {
+    if(head == tail) ret=true;
+  }
+  mx_meta.unlock();
+  return ret;
+}
+
+
 int RingBuffer::getfree(size_t& ix) {
   int rc=0;
   if(g_abort) return 2;
@@ -150,15 +168,14 @@ int RingBuffer::getfree(size_t& ix) {
   ix = head;
   while (isFull()) {
     usleep(10000);
-    if(done || g_abort) { 
-      rc = 1; 
-      break; 
-    }
+    if(isDone()) {rc = 1; break; }
+    if(g_abort) {rc = 2; break; }
   }
-  head = ++head % size; // move head to the next  
-  mx_buffer[ix].lock();
-  if(rc)
-    mx_buffer[ix].unlock();
+  if(!rc) {
+    mx_buffer[ix].lock();
+    head = ++head % size; // move head to the next  
+  }
+  print();
   headbusy.unlock();
   return rc;
 }
@@ -168,17 +185,16 @@ int RingBuffer::getfull(size_t& ix) {
   if(g_abort) return 2;
   workbusy.lock();
   ix = work;
-  while(workDone()) {
+  while(!hasData()) {
     usleep(10000);
-    if(done || g_abort) { 
-      rc = 1;
-      break; 
-    }
+    if(isDone()) {rc = 1; break; }
+    if(g_abort) {rc = 2; break; }
   }
-  work = ++work % size;  // move ptr to next
-  mx_buffer[ix].lock();
-  if(rc)
-    mx_buffer[ix].unlock();
+  if(!rc) {
+    mx_buffer[ix].lock();
+    work = ++work % size;  // move ptr to next
+  }
+  print();
   workbusy.unlock();
   return rc;
 }
@@ -190,15 +206,14 @@ int RingBuffer::getused(size_t& ix) {
   ix = tail;
   while (isEmpty()) {
     usleep(10000);
-    if(done || g_abort) { 
-      rc = 1;
-      break;
-    }
+      if(isDone()) {rc = 1; break; }
+    if(g_abort) {rc = 2; break; }
   }
-  tail = ++tail % size;  // we need the next
-  mx_buffer[ix].lock();  
-  if(rc)
-    mx_buffer[ix].unlock();
+  if(!rc) {
+    mx_buffer[ix].lock();
+    tail = ++tail % size;  // we need the next
+  }
+  print();
   tailbusy.unlock();
   return rc;
 }
@@ -207,47 +222,63 @@ int RingBuffer::getused(size_t& ix) {
 // in staging database
 void updater(int thread, SharedData& sd, Parameters& parameters) {
   pthread_setname_np(pthread_self(),"qdda-updater");
-  size_t idy=0;
+  size_t i=0;
   int rc;
   while(true) {
     if(g_abort) break;
-    rc = sd.rb.getused(idy);
+    rc = sd.rb.getused(i);
     if(rc) break;
     if(g_abort) return;
-    sd.p_sdb->begin();    
-    for(int j=0; j<sd.v_databuffer[idy].used; j++)
-      sd.p_sdb->insertdata(sd.v_databuffer[idy].v_hash[j],sd.v_databuffer[idy].v_bytes[j]);
+    sd.p_sdb->begin();   
+    if(!parameters.dryrun)
+      for(int j=0; j<sd.v_databuffer[i].used; j++)
+        sd.p_sdb->insertdata(sd.v_databuffer[i].v_hash[j],sd.v_databuffer[i].v_bytes[j]);
     sd.p_sdb->end();
-    sd.v_databuffer[idy].reset();
-    sd.rb.clear(idy);
+    sd.v_databuffer[i].reset();
+    sd.rb.clear(i);
   }
 }
 
 // read a stream(file) into available buffers
 ulong readstream(int thread, SharedData& shared, FileData& fd) {
-  ulong rbytes,blocks;
+  int rc;
+  ulong bytes,blocks;
   ulong totbytes=0;
   const ulong blocksize = shared.blocksize;
   size_t i;
+
+  size_t iosize = shared.blockspercycle * blocksize * 1024;
+  char* readbuf = new char[iosize];
+  char* zerobuf = new char[blocksize*1024];
+  memset(zerobuf, 0, blocksize*1024);
+  srand(thread);
   
   while(!fd.ifs->eof()) {
     if(g_abort) break;
-    shared.rb.getfree(i);
-
     shared.throttle.request(shared.blockspercycle * blocksize); // IO throttling, sleep if we are going too fast
-    shared.v_databuffer[i].offset = totbytes; //fd.ifs->tellg()/blocksize/1024;
+    
+    fd.ifs->read(readbuf, iosize);
+    if(fd.ratio)
+      for(int i=0; i<iosize/(blocksize*1024);i++) 
+        memcpy(readbuf + (i* blocksize * 1024), zerobuf, abs(rand())%(blocksize*1024));
 
-    fd.ifs->read(shared.v_databuffer[i].readbuf, blocksize*1024*shared.blockspercycle);
-    rbytes     = fd.ifs->gcount();
-    blocks     = rbytes / blocksize / 1024; // amount of full blocks
-    blocks    += rbytes%blocksize*1024?1:0; // partial block read, add 1
-    totbytes  += rbytes;
-    shared.v_databuffer[i].used = blocks;
+    bytes     = fd.ifs->gcount();
+    blocks    = bytes / blocksize / 1024; // amount of full blocks
+              + bytes%blocksize*1024?1:0; // partial block read, add 1
+    totbytes += bytes;    
 
-    shared.rb.clear(i);
+    for(int j=0;j<(fd.repeat?fd.repeat:1);j++) { // repeat processing the same buffer to simulate duplicates, usually repeat == 1
+      rc = shared.rb.getfree(i);
+      if(rc) break;
+      memcpy(shared.v_databuffer[i].readbuf,readbuf,iosize);
+      shared.v_databuffer[i].used = blocks;
+      shared.rb.clear(i);
+    }
     if(fd.limit_mb && totbytes >= fd.limit_mb*1048576) break; // end if we only read a partial file
   }
   fd.ifs->close();
+  delete[] readbuf;
+  delete[] zerobuf;
   return totbytes;
 }
 
@@ -257,12 +288,12 @@ void reader(int thread, SharedData& sd, v_FileData& filelist) {
   string self = "qdda-reader-" + toString(thread,0);
   pthread_setname_np(pthread_self(), self.c_str());
   for(int i=0; i<filelist.size(); i++) {
-    if(sd.a_mutex_files[i].trylock()) continue; // in use
+    if(sd.filelocks[i].trylock()) continue; // in use
     if(filelist[i].ifs->is_open()) {
       ulong bytes = readstream(thread, sd, filelist[i]);
       sd.p_sdb->insertmeta(filelist[i].filename, bytes/sd.blocksize/1024, bytes);
     }
-    sd.a_mutex_files[i].unlock();
+    sd.filelocks[i].unlock();
   }
 }
 
@@ -273,34 +304,33 @@ void worker(int thread, SharedData& sd, Parameters& parameters) {
   pthread_setname_np(pthread_self(), self.c_str());
   const ulong blocksize = sd.blocksize;
   char*  dummy    = new char[blocksize*1024];
-  size_t idx=0;
+  size_t i=0;
   ulong  hash,bytes;
   int rc;
   while (true) {
     if(g_abort) break;
-    rc = sd.rb.getfull(idx);
+    rc = sd.rb.getfull(i);
     if(rc) break;
-    // first process all blocks in the buffer
-    for(int i=0; i < sd.v_databuffer[idx].used; i++) {
+    for(int j=0; j < sd.v_databuffer[i].used; j++) {
       if(g_abort) return;
-      DataBuffer& r_blockdata = sd.v_databuffer[idx]; // shorthand to buffer for readabily
-      hash = hash_md5(r_blockdata[i], dummy, blocksize*1024); // get hash
-      bytes = hash ? compress(r_blockdata[i], dummy, blocksize*1024) : 0; // get bytes, 0 if hash=0
-      r_blockdata.v_hash[i] = hash;
-      r_blockdata.v_bytes[i] = bytes;
-      sd.v_databuffer[idx].blocks++;
-      sd.v_databuffer[idx].bytes += blocksize*1024;
+      DataBuffer& r_blockdata = sd.v_databuffer[i]; // shorthand to buffer for readabily
+      hash = hash_md5(r_blockdata[j], dummy, blocksize*1024); // get hash
+      bytes = hash ? compress(r_blockdata[j], dummy, blocksize*1024) : 0; // get bytes, 0 if hash=0
+      r_blockdata.v_hash[j] = hash;
+      r_blockdata.v_bytes[j] = bytes;
+      sd.v_databuffer[i].blocks++;
+      sd.v_databuffer[i].bytes += blocksize*1024;
       sd.lock();
       sd.blocks++;
       sd.bytes += blocksize*1024;
       sd.unlock();
-      sd.mutex_output.lock();
+      sd.mx_output.lock();
       if(sd.blocks%10000==0 || sd.blocks == 10) {
         progress(sd.blocks, blocksize, sd.bytes);           // progress indicator
       }
-      sd.mutex_output.unlock();
+      sd.mx_output.unlock();
     }
-    sd.rb.clear(idx);
+    sd.rb.clear(i);
   }
   delete[] dummy;
 }
@@ -339,6 +369,7 @@ void analyze(v_FileData& filelist, QddaDB& db, Parameters& parameters) {
 
   updater_thread = thread(updater,0, std::ref(sd), std::ref(parameters));
   for(int i=0; i<workers; i++) worker_thread[i] = thread(worker, i, std::ref(sd), std::ref(parameters));
+  sleep(1);
   for(int i=0; i<readers; i++) reader_thread[i] = thread(reader, i, std::ref(sd), std::ref(filelist));
 
   for(int i=0; i<readers; i++) reader_thread[i].join(); 

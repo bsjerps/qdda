@@ -381,7 +381,7 @@ CREATE TABLE IF NOT EXISTS metadata(lock char(1) not null default 1
 ,constraint pk_t1 primary key(lock), constraint ck_t1_l check (lock=1));
 CREATE TABLE IF NOT EXISTS files(id integer primary key autoincrement, name TEXT, hostname TEXT, timestamp integer, blocks integer, bytes integer);
 CREATE TABLE IF NOT EXISTS staging(id integer primary key autoincrement, hash integer, bytes integer);
-CREATE VIEW IF NOT EXISTS offsets as with m(b) as (select blksz from metadata) select hash, (id-1) blocks, (id-1) * m.b*1024 bytes from staging,m
+CREATE VIEW IF NOT EXISTS offsets as with m(b) as (select blksz from metadata) select hash, printf('%0#16x',hash) hexhash, (id-1) offset, (id-1) * m.b*1024 bytes from staging,m
 )");
   StagingDB newdb(fn);
   newdb.setblocksize.execl(blocksize);

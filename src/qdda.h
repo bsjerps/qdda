@@ -48,6 +48,8 @@ public:
   std::ifstream* ifs;
   string filename;
   ulong limit_mb;
+  int repeat;
+  int ratio;
 };
 
 // Parameter set to pass between functions
@@ -67,7 +69,6 @@ struct Parameters {
   bool do_mandump;
   bool do_cputest;
   bool do_purge;
-  bool do_create;
   bool do_delete;
   bool queries;
   bool skip;
