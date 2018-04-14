@@ -71,10 +71,7 @@ Specify a string with array=name=<name>,bs=<blocksize_kb>,buckets=<bucketsize1+b
 scan the first SCSI disk (usually the bootdisk) and show results.
 .P
 .B Example output
-.PP
-.in +4n
-.EX
-
+.nf
 Database info (/home/qdda/qdda.db):
 database size       = 14.41 MiB
 array id            = XtremIO X2
@@ -104,8 +101,7 @@ thin ratio          =        1.14
 combined            =        2.99
 raw capacity        =    16384.00 MiB
 net capacity        =     5485.09 MiB
-.EE
-.in
+..fi
 .PP
 .P
 .B Explanation
