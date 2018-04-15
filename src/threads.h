@@ -37,7 +37,6 @@ public:
  ~DataBuffer();
   void  reset();           // clear buffer and temp counters;
   char* operator[](int n); // access to the nth block in the buffer
-
   ulong bufsize;           // size of the read buffer in bytes
   int   used;              // number of used blocks in the buffer
   ulong blocks;            // blocks read
@@ -45,11 +44,8 @@ public:
   char* readbuf;           // the actual data
   std::vector<ulong> v_hash;
   std::vector<ulong> v_bytes;
-  
-  //ulong offset;            // offset of the first block
   ulong blocksize_bytes;
 private:
-  //Mutex mutex;
 };
 
 // IOThrottle holds shared data to provide IO bandwidth throttling
@@ -58,9 +54,9 @@ public:
   IOThrottle(ulong mibps);  // Initialize with megabytes per sec value
   void request(ulong kb);   // request to read a number of 1k blocks
 private:
-  ulong mibps;              // the bandwidth
-  Stopwatch stopwatch;      // track time between requests
-  Mutex mutex;
+  ulong      mibps;         // the bandwidth
+  Stopwatch  stopwatch;     // track time between requests
+  std::mutex mutex;         // thread safe
 };
 
 class RingBuffer {
@@ -78,11 +74,11 @@ private:
   bool hasData();
   bool isEmpty();
   bool isDone();
-  Mutex mx_meta;
-  Mutex tailbusy;
-  Mutex headbusy;
-  Mutex workbusy;
-  Mutex mx_print;
+  std::mutex mx_meta;
+  std::mutex tailbusy;
+  std::mutex headbusy;
+  std::mutex workbusy;
+  std::mutex mx_print;
   std::vector<Mutex> mx_buffer;
   size_t head;
   size_t tail;
@@ -108,5 +104,5 @@ public:
   Mutex*                  filelocks;
   int                     blockspercycle;
 private:
-  Mutex                   mutex;
+  std::mutex              mutex;
 };

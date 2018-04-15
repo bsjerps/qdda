@@ -164,7 +164,7 @@ bool RingBuffer::isDone() {
 int RingBuffer::getfree(size_t& ix) {
   int rc=0;
   if(g_abort) return 2;
-  headbusy.lock();
+  std::lock_guard<std::mutex> lock(headbusy);
   ix = head;
   while (isFull()) {
     usleep(10000);
@@ -176,14 +176,13 @@ int RingBuffer::getfree(size_t& ix) {
     head = ++head % size; // move head to the next  
   }
   print();
-  headbusy.unlock();
   return rc;
 }
 
 int RingBuffer::getfull(size_t& ix) {
   int rc=0;
   if(g_abort) return 2;
-  workbusy.lock();
+  std::lock_guard<std::mutex> lock(workbusy);
   ix = work;
   while(!hasData()) {
     usleep(10000);
@@ -195,14 +194,13 @@ int RingBuffer::getfull(size_t& ix) {
     work = ++work % size;  // move ptr to next
   }
   print();
-  workbusy.unlock();
   return rc;
 }
 
 int RingBuffer::getused(size_t& ix) {
   int rc=0;
   if(g_abort) return 2;
-  tailbusy.lock();
+  std::lock_guard<std::mutex> lock(tailbusy);
   ix = tail;
   while (isEmpty()) {
     usleep(10000);
@@ -214,7 +212,6 @@ int RingBuffer::getused(size_t& ix) {
     tail = ++tail % size;  // we need the next
   }
   print();
-  tailbusy.unlock();
   return rc;
 }
 
