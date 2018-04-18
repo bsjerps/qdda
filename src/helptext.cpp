@@ -13,12 +13,6 @@ const char* manpage_head = R"(.TH qdda 1 "2018-03-24" "QDDA" "QDDA User Manual"
 qdda \- the quick & dirty dedupe analyzer
 .SH SYNOPSIS
 .B qdda <options> [FILE...]
-.P
-FILE is usually a disk device such as /dev/sda but can also be a flat file, a named pipe, a disk partition or anything else that can be
-read as a stream. It will also read from stdin if it is not connected to a tty, i.e. you can do 'cat <file> | qdda '.
-.br
-Each file can have a modifier by adding a colon (:) and a value. Currently the value is the maximum amount of mibibytes to read from the
-stream: /dev/sda:1024 will read the first 1024MiB and then stop.
 
 .SH DESCRIPTION
 .B qdda
@@ -33,7 +27,7 @@ XtremIO X1 and X2 as well as VMAX AFA (experimental).
 can create very large database files and generate lots of read I/O and heavy CPU load. Check the 
 .B RESOURCE REQUIREMENTS
 section before you start.
-.P
+.br
 For additional safety, run
 .B qdda
 as non-root user. See the 
@@ -44,6 +38,31 @@ section for details on how to do this.
 )";
 
 const char* manpage_body = R"(
+.P
+.B FILE
+description:
+.P
+FILE is usually a disk device such as /dev/sda but can also be a flat file, a named pipe, a disk partition or anything else that can be
+read as a stream. It will also read from stdin if it is not connected to a tty, i.e. you can do 'cat <file> | qdda '.
+.P
+.B Modifiers
+.P
+Each file can have a modifier by adding a colon (:). Currently the modifier is in the format <maxmb[,dup]> where maxmb
+is the maximum amount of mibibytes to read from the stream: /dev/sda:1024 will read the first 1024MiB and then stop. dup is the
+number of times the data is processed (only for testing purposes) i.e. /dev/sda:1024,2 will generate 2048 MiB with dupcount=2 
+(the first 1024 MiB of sda but processed twice).
+.P
+.B Special\ filenames
+.P
+Special filenames are zero (alias for /dev/zero), random (alias for /dev/urandom) and compress (same as random but make the
+data compressible). This allows you to generate test data.
+.P
+.B Test data example
+.P
+qdda zero:512 random:512 random:256,2 compress:128,4
+.br
+Generates a test dataset with 512MiB zeroed, 512MiB uncompressible, unique data, 256MiB uncompressible data used twice, and 128MiB 
+compressible data with 4 copies each.
 .P
 Array definition:
 .br
@@ -63,7 +82,9 @@ VMAX\ AFA v1: Blocksize 128K, bucket sizes 8,16,24,32,40,48,56,64,72,80,88,96,10
 .TP
 .B custom
 Specify a string with array=name=<name>,bs=<blocksize_kb>,buckets=<bucketsize1+bucketsize2....>
-
+.SH ERRORS
+.B qdda
+has basic error handling. Most errors result in simply aborting with an error message and return code.
 
 .SH EXAMPLE
 .TP 
@@ -268,7 +289,7 @@ We can verify the MD5 hash:
 dd bs=16K status=none count=1 if=/dev/sda skip=181 | md5sum 
 .P
 92ab673d915a94dcf187720e8ac0d608  -
-                 |-------------|> Note that the last 15 hex digits (equal to 60 bits) match the hexadecimal hash value in the database.
+                 |-------------| --> Note that the last 15 hex digits (equal to 60 bits) match the hexadecimal hash value in the database.
 
 
 .SH RESOURCE REQUIREMENTS
@@ -324,6 +345,29 @@ starts a separate reader thread for each given file or stream, and a number of w
 .P
 TBD
 
+.SH STORAGE ARRAYS
+Currently qdda supports 3 storage arrays:
+.br
+.IP XtremIO\ X1
+The first generation XtremIO with 8KB block size and compression bucket sizes 2K, 4K, 8K. As XtremIO performs all compression and dedupe
+operations inline, the results of qdda for dedupe should match the array dedupe very closely. XtremIO uses a proprietary compression
+algorithm which has a slightly lower compression ratio compared to LZ4, but claims to be much faster. 
+This means the qdda results are slightly over-optimistic. The differences are too small however to be a major issue.
+.IP XtremIO\ X2
+With the X2, the internal blocksize was increased to 16KiB and many more (15) compression bucket sizes are available: 1K up to 16K with
+1K increments, where 15K is missing because in XtremIO X2 architecture it would allocate the same capacity as 16K uncompressed. 
+The larger block size and more variations in buckets makes XtremIO compression much more effective. 
+There is still a slight difference in compression ratio due to LZ4 versus the native XtremIO algorithm.
+.IP VMAX\ All-Flash
+VMAX data reduction estimates are currently 
+.B EXPERIMENTAL.
+.br
+VMAX compresses data using 128K chunks which get compressed in bucket sizes from 8K up to 128K with 8K increments. Not all bucket sizes are
+available at initial configuration and VMAX changes the compression layout dynamically and also avoids compression
+for up to 20% of all data, based on workload and data profile. This makes it hard for qdda to give reasonable estimates which is why
+it is marked as EXPERIMENTAL for now. The output of qdda shows the results at most ideal circumstances (all data gets deduped and
+compressed always). Future versions may improve on accuracy.
+
 .SH EXPLANATION
 How qdda works:
 .P
@@ -352,14 +396,13 @@ are very close to what All-Flash Arrays can achieve.
 
 .P
 .B Bucket Compression:
+If an array would store compressed blocks by just concatenation of the blocks (such as with file compression tools like ZIP or GZIP),
+random access would be very poor as the overhead for finding block offsets would be very high. Also, modification of a compressed block
+would cause severe fragmentation and other issues. For this reason, AFA's like XtremIO use "bucket compression". For example,
+XtremIO has bucket sizes of 1K to 16K with 1K steps. Say an incoming 16K block compresses to a size of 4444 bytes. The smallest bucket
+where this would fit into is the 5K bucket which means the remaining 676 bytes in the bucket are not used. This causes a slightly lower
+compress ratio but vastly improves performance and reduces fragmentation and partial write issues.
 
-QDDA knows 3 bucket compression scenarios and selects bucket compression based on the blocksize used:
-
-8K blocksize   - available buckets are 2K, 4K and 8K (simulates XtremIO v1)
-16K blocksize  - available buckets are 1K through 16K with 1K increments except 15K (XtremIO v2)
-128K blocksize - available buckets are 8K through 128K with 8K increments (VMAX All-Flash - experimental, unverified!)
-
-List available methods using option '-c l'
 .P
 .B Throttling:
 
