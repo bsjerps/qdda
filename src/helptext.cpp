@@ -556,6 +556,9 @@ cat /dev/<disk> | nc targethost 19000
 .SH KNOWN ISSUES
 Database journaling and synchronous mode are disabled for performance reasons. This means the database may be corrupted if qdda is ended
 in an abnormal way (killed, file system full, etc).
+.br
+Accessing the SQLite database requires recent versions of the sqlite3 tools. Older versions are not compatible with the database
+schema and abort with an error upon opening.
 .SH SEE ALSO
 lz4(1), md5(1), sqlite3(1), mkfifo(1), nc(1)
 .SH AUTHOR
