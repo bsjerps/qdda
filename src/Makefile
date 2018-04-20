@@ -7,6 +7,8 @@
 # ---------------------------------------------------------------------------
 
 prefix     = /usr/local
+mandir     = $(prefix)/share/man
+datadir    = $(prefix)/share
 version    = 2.0.0
 
 CXXFLAGS  += -std=c++0x
@@ -54,15 +56,19 @@ helptext.o: helptext.cpp
 clean:
 	rm -rf *.o qdda
 
-src:
-	tar -jcvf $(HOME)/qdda-$(version).tbz2 --transform "s|^|qdda/|" *
+src:	allclean
+	tar -jcvf $(HOME)/SOURCES/qdda-$(version).tbz2 --transform "s|^|qdda/|" *
 
 allclean:
 	rm -rf *.o */*.o qdda
 
 install: qdda
-	install -d 0755 $(prefix)/bin
+	install -m 0755 -d $(prefix)/bin
+	install -m 0755 -d $(mandir)/man1
+	install -m 0755 -d $(datadir)/qdda
 	install -m 0755 qdda $(prefix)/bin
+	cp share/* $(datadir)/qdda
+	$(prefix)/bin/qdda --mandump >$(mandir)/man1/qdda.1
 
 .PHONY: install
 

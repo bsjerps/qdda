@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# Simple script that creates a maximum sized zeroed file in a file system
+# and then deletes it. This has the effect of resetting nearly all
+# unallocated blocks in the FS to zero (causes reclaim capacity on AFAs)
+
+# Don't use this in production as it may lead to warnings about full file systems
+
+FS=${1%/}
+test -n "$FS" || exit 10
+freeblocks=$(df -P | awk -v F=$FS '$NF==F {print $(NF-2)}')
+dd if=/dev/zero of=${FS}/reclaim bs=1K count=$(($freeblocks - 10))
+rm ${FS}/reclaim
