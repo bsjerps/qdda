@@ -328,10 +328,10 @@ ulong Database::filesize() {
   return fileSize(sqlite3_db_filename(db, NULL));
 }
 
-int Database::exists(const char* fn) {
+int Database::exists(const string& fn) {
   int rc = 0;
   sqlite3* tempdb;
-  rc = sqlite3_open_v2(fn, &tempdb, SQLITE_OPEN_READONLY, NULL);
+  rc = sqlite3_open_v2(fn.c_str(), &tempdb, SQLITE_OPEN_READONLY, NULL);
   if(rc==0) {
     sqlite3_close(tempdb);
     return 1;

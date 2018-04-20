@@ -352,7 +352,6 @@ void analyze(v_FileData& filelist, QddaDB& db, Parameters& parameters) {
 
   updater_thread = thread(updater,0, std::ref(sd), std::ref(parameters));
   for(int i=0; i<workers; i++) worker_thread[i] = thread(worker, i, std::ref(sd), std::ref(parameters));
-  sleep(1);
   for(int i=0; i<readers; i++) reader_thread[i] = thread(reader, i, std::ref(sd), std::ref(filelist));
 
   for(int i=0; i<readers; i++) reader_thread[i].join(); 

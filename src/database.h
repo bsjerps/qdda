@@ -68,7 +68,7 @@ public:
   int          unlinkdb();
   static int   createdb(const string& fn, const char* schema);
   static int   deletedb(const string& fn);
-  static int   exists(const char* fn);
+  static int   exists(const string& fn);
   void         settmpdir (const string& d) { tmpdir = d; };
   int          attach(const string& s, const string& p);
   int          detach(const string& s);

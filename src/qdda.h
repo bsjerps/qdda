@@ -59,7 +59,7 @@ struct Parameters {
   string tmpdir;
   string array;
   string import;
-  string testopts;
+  //string testopts;
   ulong searchhash;
   int  bandwidth; // default bandwidth throttle (MB/s)
   int  workers;   // number of workers (threads)

@@ -78,7 +78,7 @@ ulong starttime = epoch(); // start time of program
 ofstream c_debug; // Debug stream
 
 FileData::FileData(const string& file) {
-  ratio=0;
+  ratio=0; limit_mb=1024;
   stringstream ss(file);
   string strlimit,strrepeat;
 
@@ -87,11 +87,11 @@ FileData::FileData(const string& file) {
   getline(ss,strrepeat);
   
   if(filename=="compress") ratio=1;
-  if(filename=="compress") filename = "/dev/urandom";
-  if(filename=="random") filename = "/dev/urandom";
-  if(filename=="zero") filename = "/dev/zero";
+  if(filename=="compress") { filename = "/dev/urandom"; limit_mb=1024; }
+  if(filename=="random")   { filename = "/dev/urandom"; limit_mb=1024; }
+  if(filename=="zero")     { filename = "/dev/zero";    limit_mb=1024; }
   
-  limit_mb = atoll(strlimit.c_str());
+  if(!strlimit.empty()) limit_mb = atoll(strlimit.c_str());
   repeat   = atoi(strrepeat.c_str());
 
   ifs = new ifstream;
@@ -288,52 +288,6 @@ void merge(QddaDB& db, Parameters& parameters) {
   Database::deletedb(parameters.stagingname);
 }
 
-
-// test merging performance with random data, format rows:w0:w1:w2:...
-// sizegb:zeroval:dup1:dup2:...
-// totalsize,zero=xx,dup1=xx
-void dbtest(QddaDB& db, Parameters& p) {
-  StagingDB::createdb(p.stagingname,db.blocksize);
-  StagingDB stagingdb(p.stagingname);
-  Stopwatch stopwatch;
-  const ulong blocksize = db.blocksize;
-  const ulong rowspergb = square(1024) / blocksize;
-  
-  ulong        rows = 0;  
-  string       str;
-  stringstream ss(p.testopts);
-  
-  while(ss.good()) {
-    getline(ss,str,',');
-    int dup=0;
-    ulong r=0;
-    if(isNum(str)) {
-      r=atoi(str.c_str());
-      dup=1;
-      rows+=r*rowspergb;
-      stagingdb.fillrandom(rowspergb*r,blocksize,dup);
-    } else if (str.substr(0,4) == "zero") {
-      dup=0;
-      r=atoi(str.substr(5).c_str());
-      rows += r*rowspergb;
-      stagingdb.fillzero(rowspergb*r);
-    } else if (str.substr(0,3) == "dup") {
-      dup=atoi(str.substr(3,1).c_str());
-      r=atoi(str.substr(5).c_str());
-      rows += r*rowspergb*dup;
-      stagingdb.fillrandom(rowspergb*r,blocksize,dup);
-    } else {
-      cerr << "Cannot parse " << str << endl;
-    }
-  }
-  cout << "Merge test: Loading " 
-       << rows << " " << blocksize << "k random blocks (" 
-       << rows*blocksize/1024 << " MiB) " << flush;
-  stopwatch.lap();
-  cout << "in " << stopwatch.seconds() << " s" << endl;
-  stagingdb.insertmeta("mergetest", rows, rows*blocksize*1024);
-}
-
 // test hashing, compression and insert performance
 void cputest(QddaDB& db, Parameters& p) {
  
@@ -441,7 +395,7 @@ void mandump(LongOptions& lo) {
 void findhash(Parameters& parameters) {
   StagingDB db(parameters.stagingname);
   db.findhash.bind(parameters.searchhash);
-  db.findhash.report(cout,"20,10,10");
+  db.findhash.report(cout,"20,20,10");
 }
 
 void tophash(QddaDB& db, int amount = 10) {
@@ -508,7 +462,6 @@ int main(int argc, char** argv) {
   opts.add("purge"    , 0 , ""            , p.do_purge,   "Reclaim unused space in database (sqlite vacuum)");
   opts.add("import"   , 0 , "<file>"      , p.import,     "import another database (must have compatible metadata)");
   opts.add("cputest"  , 0 , ""            , p.do_cputest, "Single thread CPU performance test");
-  opts.add("dbtest"   , 0 , "<testpars>"  , p.testopts,   "Database performance test");
   opts.add("nomerge"  , 0 , ""            , p.skip,       "Skip staging data merge and reporting, keep staging database");
   opts.add("debug"    , 0 , ""            , g_debug,      "Enable debug output");
   opts.add("queries"  , 0 , ""            , g_query,      "Show SQLite queries and results"); // --show?
@@ -551,11 +504,12 @@ int main(int argc, char** argv) {
       QddaDB::createdb(p.dbname);
     }
   }
-  if((p.testopts.size() || p.do_cputest) && !p.append) {
+  if(p.do_cputest && !p.append) {
     if(!g_quiet) cout << "Creating new database " << p.dbname << endl;
     Database::deletedb(p.dbname);
     QddaDB::createdb(p.dbname);
-  }    
+  }
+  if(!Database::exists(p.dbname)) QddaDB::createdb(p.dbname);
   QddaDB db(p.dbname);
   db.parsemetadata(parameters.array);
 
@@ -567,7 +521,6 @@ int main(int argc, char** argv) {
   if(p.do_purge)             { db.vacuum();           }
   else if(!p.import.empty()) { import(db,p.import);   }
   else if(p.do_cputest)      { cputest(db,p) ;        } 
-  else if(p.testopts.size()) { dbtest(db, p);         }
   else if(p.searchhash!=0)   { findhash(p);           }
   else if(p.tophash!=0)      { tophash(db,p.tophash); }
   else {

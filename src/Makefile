@@ -7,7 +7,6 @@
 # ---------------------------------------------------------------------------
 
 prefix     = /usr/local
-sysconfdir = /etc
 version    = 2.0.0
 
 CXXFLAGS  += -std=c++0x
@@ -21,14 +20,6 @@ OBJECTS   += lz4/lz4.o
 # CXXFLAGS  += -D__DEBUG
 
 all: qdda
-
-# Static linking of lz4 avoids having to install dependencies
-# The other libs are usually available on most Linux systems
-# Note that building on newer systems causes problems with
-# older versions of LIBC and STDC++ libraries.
-# LZ4 needs to be version 1.31 (or higher).
-
-#sqlite/sqlite3.o md5/md5.o lz4/lz4.o lzdatagen/lzdatagen.o
 
 qdda: qdda.o database.o tools.o output.o threads.o helptext.o $(OBJECTS)
 	g++ $(LDFLAGS) qdda.o database.o tools.o helptext.o threads.o output.o $(OBJECTS) $(LIBS) $(STATIC) -o qdda 
@@ -71,9 +62,7 @@ allclean:
 
 install: qdda
 	install -d 0755 $(prefix)/bin
-	install -d 0755 $(sysconfdir)/bash_completion.d
 	install -m 0755 qdda $(prefix)/bin
-#	install -m 0644 support/qdda.bash $(sysconfdir)/bash_completion.d
 
 .PHONY: install
 

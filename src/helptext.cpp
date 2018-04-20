@@ -305,6 +305,21 @@ dd bs=16K status=none count=1 if=/dev/sda skip=181 | md5sum
 92ab673d915a94dcf187720e8ac0d608  -
                  |-------------| --> Note that the last 15 hex digits (equal to 60 bits) match the hexadecimal hash value in the database.
 
+.SH COMBINING MULTIPLE SCANS
+By default, when scanning data, qdda deletes the existing database and creates a new one. Using the --append option you can
+keep existing data and add more file(s) to the existing database:
+.P
+qdda /dev/<disk1>
+qdda --append /dev/<disk2>
+.P
+It is also possible to join 2 databases together using --import:
+.P
+.nf
+qdda --delete
+qdda --db db1 random:512
+qdda --db db2 random:512
+qdda --import db1.db
+.fi
 
 .SH RESOURCE REQUIREMENTS
 .B Storage capacity
@@ -324,7 +339,7 @@ So at 16K blocksize the database capacity for scanning is roughly 0.11% of the d
 After scanning the primary database will be updated from the staging database (merge process). During merge the required capacity is double
 the size or 0.22% for both databases, however, SQLite also creates hidden temporary tables which require another 0.22%.
 .P
-Summary for a 1TiB random dataset:
+Sizing summary for a 1TiB random dataset:
 .br
 Primary database - 1400MiB (will be smaller if the data has zero blocks or can be deduped)
 .br
@@ -354,7 +369,7 @@ Note that you may change the locations of primary and staging database (--db <fi
 qdda will scan data at 200MB/s throttled using large blocks, concurrently reading all files. If throttling is disabled, qdda will scan
 as fast as possible until CPU power for processing the data or writing to the database becomes the bottleneck.
 .P
-.B CPU and memory requirements
+.B CPU
 .P
 .B qdda
 starts a separate reader thread for each given file or stream (max 32), and a number of worker threads equivalent to the number of CPU cores
@@ -364,7 +379,7 @@ If the amount of readers is less than the number of files, each reader will proc
 queue until another file is completed. If the amount of workers is set to less than the amount of CPU cores, hashing and compression
 will be limited to those threads.
 .P
-.B Memory required
+.B Memory
 .P
 .B qdda
 allocates a number of read buffers which are 1 MiB each. The amount of buffers is set to #workers + #readers + 8. So on a
@@ -412,17 +427,14 @@ compress ratio but vastly improves performance and reduces fragmentation and par
 
 qdda processes a number of blocks per read IO and measures the service time. 
 If the service time is too low it means the throughput is
-higher than the bandwidth limit. The CPU is put to sleep for a number of microseconds to match the overall bandwidth limit.
-This prevents accidentally starving IO on a production host. Disable with '-b 0' option or set different bandwidth
+higher than the bandwidth limit. The reader is then put to sleep for a number of microseconds to match the overall bandwidth limit.
+This prevents accidentally starving IO on a production host. Disable throttling with '--bandwidth 0' or set a different bandwidth.
 
 .P
 .B Blocksize:
 
-The default blocksize is 16KiB to match modern All flash Arrays. The block size is stored in metadata and only datasets
-with matching blocksizes can be merged. qdda reports X1 compression if a blocksize of 8K is detected, X2 if
-the default 16K is detected, or VMAX AFA compression for 128K blocksize. I will not report compression ratios with other
-blocksizes unless you load the bucketsizes and descriptions in the bucket tables after creating the database.
-
+The default blocksize is 16KiB (XtremIO X2). The block size is stored in metadata and only datasets
+with matching blocksizes can be merged or combined. The maximum blocksize is currently 128K, the minimum is 1K.
 
 .SH ACCURACY
 .B Notes on hash algorithm
@@ -453,14 +465,13 @@ but for an analysis tool a few collisions are not a serious problem so we can ge
 .P
 .B qdda
 uses LZ4 with default parameters for compression. Some storage arrays (including XtremIO) use a proprietary compression algorithm
-usually for performance reasons or to achieve higher compression ratios. Also some arrays (such as VMAX) don't compress 
-.B ALL
+usually for performance reasons or to achieve higher compression ratios. Also some arrays (such as VMAX) don't compress ALL
 data but keep frequently accessed data in uncompressed storage pools.
 .br
 Some arrays do post-processing which also results in not all data being compressed or deduped all the time.
 .br
 .B qdda
-currently ignores these effects and produces results for all data as if it was compressed and deduped.
+currently ignores these effects and produces results for all data as if it was compressed and deduped immediately (inline).
 
 .SH PERFORMANCE
 .B qdda
@@ -517,21 +528,20 @@ if set, is used for the temporary tables such as used for sorting and joining
 .IP TMPDIR
 .br
 if SQLITE_TMPDIR is not set, TMPDIR is used for temp tables
+
 .SH SECURITY AND SAFETY
-For added safety you may run qdda as a non-privileged user. Non-root users usually do not have access to block devices.
-To run QDDA in a safe way, there are various methods (assuming the "qdda" user without root privileges) you need to provide read
-access to the disk devices you need to scan.
-.P
 .B qdda
-is safe to run even on files/devices that are in use. It opens streams read-only and cannot modify any files except 
-SQLite3 database files.
-It writes to a database file that needs to be either newly created or a pre-existing SQLite3 database.
+is safe to run even on files/devices that are in use. It opens streams read-only and by design, it cannot modify any files except 
+SQLite3 database files. It writes to a database file that needs to be either newly created or a pre-existing SQLite3 database.
 It can remove the database file but ONLY if it is an SQLite3 file.
+.P
+For added safety you may run qdda as a non-privileged user. However, non-root users usually do not have read access to block devices.
+To run qdda in a safe way, there are various methods you need to provide read access to the disk devices you need to scan.
+.P
+Changing the group/permissions using chmod on /dev/<disk> is problematic as it either gives all users read access
+or alters permissions which may break other applications such as Oracle ASM. 
 .br
-Changing the group/permissions on /dev/<disk> is problematic as it either gives all users read access (chmod 664) or alters permissions
-for other applications such as Oracle ASM. 
-.br
-The best solution I have found is to use extended ACLs on Linux:
+The best solution to this issue I have found is to use extended ACLs on Linux:
 .PP
 .br
 .EX
@@ -539,8 +549,9 @@ setfacl -m u:<user>:r /dev/<disk>
 .EE
 .PP
 .br
-This gives qdda read-only access without altering any of the existing ownerships/permissions. The permissions will be reset at next reboot.
-You need to have ACL enabled on the root file system (holding /dev/) and the setfacl tool installed (RPM package acl).
+This gives <user> read-only access without altering any of the existing ownerships/permissions. The permissions will 
+typically be reset at next reboot or through udev(7).
+You need to have ACL enabled on the file system containing /dev/ and the setfacl tool installed.
 
 .SH OTHER PLATFORMS
 .B qdda
@@ -564,7 +575,7 @@ in an abnormal way (killed, file system full, etc).
 Accessing the SQLite database requires recent versions of the sqlite3 tools. Older versions are not compatible with the database
 schema and abort with an error upon opening.
 .SH SEE ALSO
-lz4(1), md5(1), sqlite3(1), mkfifo(1), nc(1)
+lz4(1), md5(1), sqlite3(1), mkfifo(1), nc(1), udev(7), setfacl(1)
 .SH AUTHOR
 Written by Bart Sjerps \fIhttp://bartsjerps.wordpress.com\fR
 .br
