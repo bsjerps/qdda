@@ -27,4 +27,8 @@
 *.exe
 *.out
 *.app
+
 qdda
+
+# Swap files
+*.swp
