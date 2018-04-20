@@ -102,40 +102,40 @@ has basic error handling. Most errors result in simply aborting with an error me
 
 .SH EXAMPLE
 .TP 
-.B qdda /dev/sda
-scan the first SCSI disk (usually the bootdisk) and show results.
+.B qdda compress:128,4 compress:256,2 compress:512 zero:512
+Analyze a compressible reference test data set with 128Mx4, 256Mx2, 512x1 and 512M zeroed.
 .P
 .B Example output
 .nf
-Database info (/home/qdda/qdda.db):
-database size       = 14.41 MiB
+Database info (/home/bart/qdda.db):
+database size       = 1.12 MiB
 array id            = XtremIO X2
 blocksize           = 16 KiB
 
 Overview:
-total               =    16384.00 MiB (   1048576 blocks)
-free (zero)         =     2048.00 MiB (    131072 blocks)
-used                =    14336.00 MiB (    917504 blocks)
-dedupe savings      =     4096.00 MiB (    262144 blocks)
-deduped             =    10240.00 MiB (    655360 blocks)
-compressed          =     5124.51 MiB (     49.96 %)
-allocated           =     5485.09 MiB (    351046 blocks)
+total               =     2048.00 MiB (    131072 blocks)
+free (zero)         =      512.00 MiB (     32768 blocks)
+used                =     1536.00 MiB (     98304 blocks)
+dedupe savings      =      640.00 MiB (     40960 blocks)
+deduped             =      896.00 MiB (     57344 blocks)
+compressed          =      451.93 MiB (     49.56 %)
+allocated           =      483.25 MiB (     30928 blocks)
 
 Details:
-used                =    14336.00 MiB (    917504 blocks)
-compressed raw      =     7172.75 MiB (     49.97 %)
-unique data         =     7168.00 MiB (    458752 blocks)
-non-unique data     =     7168.00 MiB (    458752 blocks)
+used                =     1536.00 MiB (     98304 blocks)
+compressed raw      =      775.41 MiB (     49.52 %)
+unique data         =      512.00 MiB (     32768 blocks)
+non-unique data     =     1024.00 MiB (     65536 blocks)
 
 Summary:
-percentage used     =       87.50 %
-percentage free     =       12.50 %
-deduplication ratio =        1.40
-compression ratio   =        1.87
-thin ratio          =        1.14
-combined            =        2.99
-raw capacity        =    16384.00 MiB
-net capacity        =     5485.09 MiB
+percentage used     =       75.00 %
+percentage free     =       25.00 %
+deduplication ratio =        1.71
+compression ratio   =        1.85
+thin ratio          =        1.33
+combined            =        4.24
+raw capacity        =     2048.00 MiB
+net capacity        =      483.25 MiB
 .fi
 .PP
 .P
@@ -184,6 +184,7 @@ equal to total
 .IP net\ capacity
 equal to allocated
 .P
+.TP
 .B qdda --detail
 Show detailed histograms from the database
 .P
@@ -191,42 +192,37 @@ Show detailed histograms from the database
 .nf
 File list:
 file      blksz     blocks         MiB date               url                                                                             
-1         16384      65536        1024 20180414_0532      workstation:/dev/sda                                                            
+1         16384      32768         512 20180420_0922      workstation:/dev/zero                                                           
+2         16384       8192         128 20180420_0922      workstation:/dev/urandom                                                        
+3         16384      16384         256 20180420_0922      workstation:/dev/urandom                                                        
+4         16384      32768         512 20180420_0922      workstation:/dev/urandom                                                        
 
 Dedupe histogram:
-dup                blocks              bytes          MiB
-0                   10804          177012736       168.81
-1                   45075          738508800       704.30
-2                    8558          140214272       133.72
-3                     465            7618560         7.27
-4                      20             327680         0.31
-5                      10             163840         0.16
-6                       6              98304         0.09
-8                      16             262144         0.25
-9                      18             294912         0.28
-16                     16             262144         0.25
-146                   146            2392064         2.28
-402                   402            6586368         6.28
-Total:              65536         1073741824      1024.00
+dup            blocks         perc          MiB
+0               32768        25.00       512.00
+1               32768        25.00       512.00
+2               32768        25.00       512.00
+4               32768        25.00       512.00
+Total:         131072       100.00      2048.00
 
-Compression Histogram (0): 
-size              buckets       blocks          MiB
-1                    1006           63         0.98
-2                    1293          162         2.53
-3                    1902          357         5.58
-4                    2185          547         8.55
-5                    1989          622         9.72
-6                    2445          917        14.33
-7                    2508         1098        17.16
-8                    2772         1386        21.66
-9                    3061         1722        26.91
-10                   3864         2415        37.73
-11                   3919         2695        42.11
-12                   3576         2682        41.91
-13                   2418         1965        30.70
-15                   1957         1835        28.67
-16                  14629        14629       228.58
-Total:              49524        33095       517.11
+Compression Histogram (XtremIO X2): 
+size          buckets         perc       blocks          MiB
+1                3360         5.86          210         3.28
+2                3670         6.40          459         7.17
+3                3526         6.15          662        10.34
+4                3601         6.28          901        14.08
+5                3629         6.33         1135        17.73
+6                3621         6.31         1358        21.22
+7                3498         6.10         1531        23.92
+8                3474         6.06         1737        27.14
+9                3530         6.16         1986        31.03
+10               3582         6.25         2239        34.98
+11               3582         6.25         2463        38.48
+12               3533         6.16         2650        41.41
+13               3651         6.37         2967        46.36
+15               7319        12.76         6862       107.22
+16               3768         6.57         3768        58.88
+Total:          57344       100.00        30928       483.25
 .fi
 .P
 .B Explanation
@@ -238,11 +234,12 @@ shows info on the files that were scanned.
 .P
 shows the distribution of duplicate counts of the scanned blocks. The first row (0) is a special case and shows
 how many blocks were blank (zeroed). Each other row shows dupcount (how many copies of each block were found), the amount of blocks,
-the amount of bytes (blocks * blocksize), and Mibibytes. For example, the row with dupcount 4 has 20 blocks which means qdda
-found 4 blocks to be the same (dupcount 4), and 4 other blocks being the same and so on with a total of 20 blocks 
-(5 sets of 4 similar blocks).
+the percentage (from all scanned blocks), and Mibibytes (after dedupe). For example, the row with dupcount 4 has 32768 blocks
+which means qdda found 4 blocks to be the same (dupcount 4), 4 more blocks being the same and so on with a total of 32768 blocks 
+(8192 sets of 4 similar blocks each).
 The row with dup=1 means these are unique blocks in the dataset. A very high dupcount usually is the result of some special blocks such as 
-filled with ones (0xFFFFFFFF...) or other metadata padding blocks.
+filled with ones (0xFFFFFFFF...) or other common data structures such as metadata or padding blocks.
+In our reference test set the dupcounts are distributed evenly.
 .P
 .B Compression\ histogram
 .P
@@ -250,17 +247,20 @@ qdda will calculate the compressed size for each (deduped) block and sort it int
 the defined bucket sizes for the array. For example XtremIO X1 has bucket sizes 2K,4K, 8K. A block with a compressed size between 1 and
 2048 bytes will go into the 2K bucket, sizes between 2049 and 4096 will go into bucket 4K and everything else into 8K.
 .br
-The compression histogram shows the distribution of bucket sizes. In this case for XtremIO X2 it shows that 1006 blocks were compressed
-into 1K buckets. The array has a blocksize of 16K so in order to store 1006 1K buckets we need 63 blocks (1006*1/16).
+The compression histogram shows the distribution of bucket sizes. In this case for XtremIO X2 it shows that 3360 blocks were compressed
+into 1K buckets. The array has a blocksize of 16K so in order to store 3360 1K buckets we need 210 16K blocks (3360*1/16).
 .br
-2772 blocks were compressed into the 8K bucket, and this requires 1098 blocks to be allocated (2772*8/16).
-.br 14629 blocks could not be compressed in less than 16K so these are stored 1:1.
+3474 blocks were compressed into the 8K bucket, and this requires 1737 blocks to be allocated (3474*8/16).
+.br
+3768 blocks could not be compressed in less than 16K so these are stored 1:1.
 .P
 .B qdda --tophash 5
 .P
 Shows the 5 most common hash values in the database. Note that these are the 60-bit truncated MD5 hashes of each block.
 .P
 .B Example output
+.br
+(from a scan of a Linux bootdisk i.e. /dev/sda)
 .nf
 hash                 blocks    
 452707908990536042   402       
@@ -275,7 +275,7 @@ hash                 blocks
 We see that 452707908990536042 is the most common hash in the database with a dupcount of 402. To find out what the contents are of a
 block that has this hash value, we can scan the data again but keep the staging database with the --nomerge option
 as the staging database keeps all the offsets of the block hashes (if we only scan one file). We can then query the staging database for
-the offsets:
+the offsets (will look for the 2nd most common hash, 110182122676868616):
 .P
 sqlite3 qdda-staging.db "select * from offsets where hash=110182122676868616 limit 2"
 .br
@@ -346,20 +346,31 @@ Staging database: $HOME/qdda-staging.db
 .br
 Temp storage: /var/tmp
 .P
+Note that you may change the locations of primary and staging database (--db <file> option) and for the hidden temp tables
+(--tmpdir <path> option or by setting SQLITE_TMPDIR).
+.P
 .B I/O requirements
+.P
 qdda will scan data at 200MB/s throttled using large blocks, concurrently reading all files. If throttling is disabled, qdda will scan
-as fast as possible unless CPU power for processing the data is limited.
+as fast as possible until CPU power for processing the data or writing to the database becomes the bottleneck.
 .P
 .B CPU and memory requirements
 .P
 .B qdda
-starts a separate reader thread for each given file or stream, and a number of worker threads equivalent to the number of CPU cores.
+starts a separate reader thread for each given file or stream (max 32), and a number of worker threads equivalent to the number of CPU cores
+unless the amount of workers and readers is changed via command line options.
+.br
+If the amount of readers is less than the number of files, each reader will process one file at a time so some files will be on the wait
+queue until another file is completed. If the amount of workers is set to less than the amount of CPU cores, hashing and compression
+will be limited to those threads.
 .P
 .B Memory required
 .P
-TBD
-
-
+.B qdda
+allocates a number of read buffers which are 1 MiB each. The amount of buffers is set to #workers + #readers + 8. So on a
+system with 8 cores reading 2 files, the amount of buffers = 2 + 8 + 8 = 18 MiB.
+.br
+qdda also requires additional memory for SQLite, etc. but the total required memory usually fits in less than 100MiB.
 
 .SH EXPLANATION
 How qdda works:

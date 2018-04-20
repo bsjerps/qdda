@@ -60,7 +60,10 @@ using namespace std;
  ******************************************************************************/
 
 const char* PROGVERSION   = "2.0.0" RELEASE;
-const ulong DEFAULT_BANDWIDTH = 200;     //
+const char* kdefault_array = "x2";
+
+const int kdefault_bandwidth = 200;
+const int kmax_reader_threads = 32;
 
 /*******************************************************************************
  * Initialization - globals
@@ -484,40 +487,39 @@ int main(int argc, char** argv) {
   v_FileData  filelist;
 
   // set default values
-  
   p.workers   = cpuCount();
-  p.readers   = 32;
-  p.bandwidth = DEFAULT_BANDWIDTH;
-  p.array     = "x2";
+  p.readers   = kmax_reader_threads;
+  p.bandwidth = kdefault_bandwidth;
+  p.array     = kdefault_array;
   
   LongOptions opts;
-  opts.add("version"  ,'V', ""             , showversion,  "show version and copyright info");
-  opts.add("help"     ,'h', ""             , p.do_help,    "show usage");
-  opts.add("man"      ,'m', ""             , manpage,      "show detailed manpage");
-  opts.add("db"       ,'d', "<file>"       , p.dbname,     "database file path (default $HOME/qdda.db)");
-  opts.add("append"   ,'a', ""             , p.append,     "Append data instead of deleting database");
-  opts.add("delete"   , 0 , ""             , p.do_delete,  "Delete database");
-  opts.add("quiet"    ,'q', ""             , g_quiet,      "Don't show progress indicator or intermediate results");
-  opts.add("bandwidth",'b', "<mb/s>"       , p.bandwidth,  "Throttle bandwidth in MB/s (default 200, 0=disable)");
-  opts.add("array"    , 0 , "<id|def>"     , p.array,      "set array type or custom definition <x1|x2|vmax1|definition>");
-  opts.add("list"     ,'l', ""             , showlist,     "list supported array types and custom definition options");
-  opts.add("detail"   ,'x', ""             , p.detail,     "Detailed report (file info and dedupe/compression histograms)");
-  opts.add("dryrun"   ,'n', ""             , p.dryrun,     "skip staging db updates during scan");
-  opts.add("purge"    , 0 , ""             , p.do_purge,   "Reclaim unused space in database (sqlite vacuum)");
-  opts.add("import"   , 0 , "<file>"       , p.import,     "import another database (must have compatible metadata)");
-  opts.add("cputest"  , 0 , ""             , p.do_cputest, "Single thread CPU performance test");
-  opts.add("dbtest"   , 0 , "<testpars>"   , p.testopts,   "Database performance test");
-  opts.add("nomerge"  , 0 , ""             , p.skip,       "Skip staging data merge and reporting, keep staging database");
-  opts.add("debug"    , 0 , ""             , g_debug,      "Enable debug output");
-  opts.add("queries"  , 0 , ""             , g_query,      "Show SQLite queries and results"); // --show?
-  opts.add("tmpdir"   , 0 , "<dir>"        , p.tmpdir,     "Set $SQLITE_TMPDIR for temporary files");
-  opts.add("workers"  , 0 , "<wthreads>"   , p.workers,    "number of worker threads");
-  opts.add("readers"  , 0 , "<rthreads>"   , p.readers,    "(max) number of reader threads");
-  opts.add("findhash" , 0 , "<hash>"       , p.searchhash, "find blocks with hash=<hash> in staging db");
-  opts.add("tophash"  , 0 , "<num>"        , p.tophash,    "show top <num> hashes by refcount");
-  opts.add("mandump"  , 0 , ""             , p.do_mandump, "dump raw manpage to stdout");
+  opts.add("version"  ,'V', ""            , showversion,  "show version and copyright info");
+  opts.add("help"     ,'h', ""            , p.do_help,    "show usage");
+  opts.add("man"      ,'m', ""            , manpage,      "show detailed manpage");
+  opts.add("db"       ,'d', "<file>"      , p.dbname,     "database file path (default $HOME/qdda.db)");
+  opts.add("append"   ,'a', ""            , p.append,     "Append data instead of deleting database");
+  opts.add("delete"   , 0 , ""            , p.do_delete,  "Delete database");
+  opts.add("quiet"    ,'q', ""            , g_quiet,      "Don't show progress indicator or intermediate results");
+  opts.add("bandwidth",'b', "<mb/s>"      , p.bandwidth,  "Throttle bandwidth in MB/s (default 200, 0=disable)");
+  opts.add("array"    , 0 , "<id|def>"    , p.array,      "set array type or custom definition <x1|x2|vmax1|definition>");
+  opts.add("list"     ,'l', ""            , showlist,     "list supported array types and custom definition options");
+  opts.add("detail"   ,'x', ""            , p.detail,     "Detailed report (file info and dedupe/compression histograms)");
+  opts.add("dryrun"   ,'n', ""            , p.dryrun,     "skip staging db updates during scan");
+  opts.add("purge"    , 0 , ""            , p.do_purge,   "Reclaim unused space in database (sqlite vacuum)");
+  opts.add("import"   , 0 , "<file>"      , p.import,     "import another database (must have compatible metadata)");
+  opts.add("cputest"  , 0 , ""            , p.do_cputest, "Single thread CPU performance test");
+  opts.add("dbtest"   , 0 , "<testpars>"  , p.testopts,   "Database performance test");
+  opts.add("nomerge"  , 0 , ""            , p.skip,       "Skip staging data merge and reporting, keep staging database");
+  opts.add("debug"    , 0 , ""            , g_debug,      "Enable debug output");
+  opts.add("queries"  , 0 , ""            , g_query,      "Show SQLite queries and results"); // --show?
+  opts.add("tmpdir"   , 0 , "<dir>"       , p.tmpdir,     "Set $SQLITE_TMPDIR for temporary files");
+  opts.add("workers"  , 0 , "<wthreads>"  , p.workers,    "number of worker threads");
+  opts.add("readers"  , 0 , "<rthreads>"  , p.readers,    "(max) number of reader threads");
+  opts.add("findhash" , 0 , "<hash>"      , p.searchhash, "find blocks with hash=<hash> in staging db");
+  opts.add("tophash"  , 0 , "<num>"       , p.tophash,    "show top <num> hashes by refcount");
+  opts.add("mandump"  , 0 , ""            , p.do_mandump, "dump raw manpage to stdout");
 #ifdef __DEBUG
-  opts.add("buffers"  , 0 , "<buffers>"    , p.buffers,    "number of buffers (debug only!)");
+  opts.add("buffers"  , 0 , "<buffers>"   , p.buffers,    "number of buffers (debug only!)");
 #endif
 
   rc=opts.parse(argc,argv);

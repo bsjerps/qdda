@@ -20,7 +20,6 @@
 #include <sys/types.h>
 #include <sys/syscall.h>
 
-// #include "lzdatagen/lzdatagen.h"
 #include "tools.h"
 #include "database.h"
 #include "qdda.h"
@@ -28,14 +27,12 @@
 
 using namespace std;
 
-// dirty hack to improve readability
-// #define string std::string
-
-//const ulong iosizex = 1024; // kilobytes per IO
-
 extern bool g_debug;
 extern bool g_quiet;
 extern bool g_abort;
+
+const int kextra_buffers = 8;
+const size_t kbufsize = 1024;
 
 DataBuffer::DataBuffer(ulong blocksize, ulong blocksps) {
   blocksize_bytes = blocksize * 1024;
@@ -74,8 +71,7 @@ SharedData::SharedData(int buffers, int files, ulong blksz, StagingDB* db, int b
   throttle(bw), rb(buffers)
 {
   blocksize      = blksz;
-  //blockspercycle = (iosizex * 1024) / blocksize / 1024;
-  blockspercycle = 1024 / blocksize; // read 1MiB per IO
+  blockspercycle = kbufsize / blocksize; // read 1MiB per IO
   blocks         = 0;
   bytes          = 0;
   cbytes         = 0;
@@ -91,8 +87,6 @@ SharedData::SharedData(int buffers, int files, ulong blksz, StagingDB* db, int b
 SharedData::~SharedData() {
   delete[] filelocks;
 }
-
-//int SharedData::size() { return bufsize; }
 
 // get the process thread id from within a thread
 long threadPid() { return (long int)syscall(SYS_gettid); }
@@ -118,46 +112,38 @@ void RingBuffer::clear(size_t ix) {
 }
 
 void RingBuffer::print() {
+  #ifndef __DEBUG
   return;
+  #else
   mx_print.lock();
   cout <<  "T" << setw(4) << tail 
        << " W" << setw(4) << work 
        << " H" << setw(4) << head
        << endl << flush;
   mx_print.unlock();
+  #endif
 }
 bool RingBuffer::isFull() {
-  bool ret;
-  mx_meta.lock();
-  ret = ((head+1) % size) == tail;
-  mx_meta.unlock();
-  return ret;
+  std::lock_guard<std::mutex> lock(mx_meta);
+  return ((head+1) % size) == tail;
 }
 
 bool RingBuffer::hasData() {
-  bool ret;
-  mx_meta.lock();
-  ret = work != head;
-  mx_meta.unlock();
-  return ret;
+  std::lock_guard<std::mutex> lock(mx_meta);
+  return work != head;
 }
 
 bool RingBuffer::isEmpty() {
-  bool ret;
-  mx_meta.lock();
-  ret = tail == work;
-  mx_meta.unlock();
-  return ret;
+  std::lock_guard<std::mutex> lock(mx_meta);
+  return tail == work;
 }
 
 bool RingBuffer::isDone() {
-  bool ret = false;
-  mx_meta.lock();
+  std::lock_guard<std::mutex> lock(mx_meta);
   if(done) {
-    if(head == tail) ret=true;
+    if(head == tail) return true;
   }
-  mx_meta.unlock();
-  return ret;
+  return false;
 }
 
 
@@ -347,7 +333,7 @@ void analyze(v_FileData& filelist, QddaDB& db, Parameters& parameters) {
 
   int workers     = parameters.workers;
   int readers     = min( (int)filelist.size(), parameters.readers);
-  int buffers     = parameters.buffers ? parameters.buffers : workers + readers + 8;
+  int buffers     = parameters.buffers ? parameters.buffers : workers + readers + kextra_buffers;
   ulong blocksize = db.blocksize;
 
   SharedData sd(buffers, filelist.size(), blocksize, &stagingdb, parameters.bandwidth);
