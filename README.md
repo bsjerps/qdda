@@ -22,8 +22,7 @@ Other features:
 - Can merge (combine) results from different nodes (i.e. distributed storage environments)
 - Scales to datasets of multiple terabytes (tested 3+TB) although it may take a while
 - Can report compression and deduplication histograms
-- Scan speed on Intel i5-4440 is about 400MB/s. (single threaded)
-- Data processing speed (DB index+merge) ~ 2000MB/s but will slow down a bit with large datasets
+- Scan speed up to 3GB/s (multi-threaded)
 - The SQLite database can be queried with standard SQLite tools
 
 Wiki page: http://outrun.nl/wiki/qdda
@@ -36,15 +35,15 @@ instructions.
 Enterprise Linux systems (RHEL-based):
 
 - Install the Outrun Extras repository: `yum install http://yum.outrun.nl/outrun-extras.rpm`
-
 - Install qdda from repo: `yum install qdda`
+- Binary only: download the zip file from the downloads directory
 
 Non-EL based:
-Either copy the /usr/bin/qdda binary from the RPM package or build from source.
+- Download the ZIP file from the downloads directory.
 
 Building from source
 
-Build prerequisites: sqlite-devel lz4-devel lz4-static
+Build prerequisites: stdc++, make, pthreads
 ```
 wget https://github.com/outrunnl/qdda/archive/master.zip
 unzip master.zip 
@@ -54,10 +53,12 @@ make install
 
 ## Usage
 
-Run `qdda -h` for command line options, `qdda -H` for more extensive help.
+Run `qdda -h` for command line options, `qdda -m` for more extensive help.
 Further documentation on the wiki page: http://outrun.nl/wiki/qdda
 
 ## Example
+
+(for qdda 1.9.0, needs to be updated for 2.x)
 
 The example shows QDDA run against 3 Oracle ASM devices
 with Oracle 12c and ASM. The database on disk has about 
@@ -105,8 +106,9 @@ raw capacity = total scanned disk space
 net capacity = required space on an XtremIO X2
 
 ## Future
-- Multithreading support (almost done, huge speed boost)
-- Validate various compression methods (starting with VMAX all-flash)
+- More storage arrays
+- More special database queries
+- Multiple compression methods
 
 ## Licensing
 
