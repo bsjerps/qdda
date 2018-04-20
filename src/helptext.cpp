@@ -510,13 +510,11 @@ Merging 67108864 blocks (1048576 MiB) with 0 blocks (0 MiB) in 157.28 sec (42668
 .in
 .P
 Tuning - You may speed up I/O by altering the default database location from $HOME/qdda.db to another path with the '-d' option,
-to a faster file system (such as SSD based). You can also set the SQLite TEMP dir to an alternative location with
- '--tmpdir' or setting SQLITE_TMPDIR (also helps if you run out of diskspace).
+to a faster file system (such as SSD based). You can also set the SQLite TEMP dir to an alternative location with '--tmpdir <dir>'
+or setting SQLITE_TMPDIR (also helps if you run out of diskspace).
 .br
 You can avoid the merge (join) phase and delay it to a later moment using the "--nomerge" (no report) option. 
 Ideal if you scan on a slow server with limited space and you want to do the heavy lifting on a faster host later.
-
-
 
 .SH CONFIG FILES
 None, everything is contained in the SQLite database and command line options
@@ -572,15 +570,26 @@ cat /dev/<disk> | nc targethost 19000
 Database journaling and synchronous mode are disabled for performance reasons. This means the database may be corrupted if qdda is ended
 in an abnormal way (killed, file system full, etc).
 .br
-Accessing the SQLite database requires recent versions of the sqlite3 tools. Older versions are not compatible with the database
+Accessing the SQLite database directly requires recent versions of the sqlite3 tools. Older versions are not compatible with the database
 schema and abort with an error upon opening.
+.br
+Scanning disk partitions (/dev/sdb1, /dev/sdd4 etc) or otherwise unaligned partitions may produce poor dedupe results. This is
+"as designed" - we assume you know what you are doing.
+.br
+Dumping multiple devices to a single pipe (i.e. cat /dev/sda /dev/sdb | qdda) may result in wrong alignment as well.
+
+
+
 .SH SEE ALSO
 lz4(1), md5(1), sqlite3(1), mkfifo(1), nc(1), udev(7), setfacl(1)
+
 .SH AUTHOR
 Written by Bart Sjerps \fIhttp://bartsjerps.wordpress.com\fR
 .br
-If you have suggestions for improvements in this tool, please send them
-along via the above address.
+If you have suggestions for improvements in this tool, please send them along via the above address.
+.br
+The source code and downloadable binaries are available from \fIhttps://github.com/outrunnl/qdda\fR 
+
 .SH COPYRIGHT
 Copyright © 2018 Bart Sjerps,  License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>.
 .br
@@ -591,23 +600,4 @@ This software is provided "as is" and follows the licensing and warranty guideli
 of the GPL. In normal language that means I will not be held 
 responsible for any problems you may encounter with this software.
 )";
-
-const char* qdda_longhelp = R"(
-
-Adding new streams/files to an existing database:
-
-Use the "-a" (append) option to avoid overwriting (deleting) the existing database.
-
-Custom queries:
-
-The database is standard SQLite and if you want to run your own queries, you can. Just type "sqlite /var/tmp/qdda.db" and you can run any SQLite
-statement you like.
-
-Troubleshooting:
-
-If you don't get the dedupe results you expect, make sure you have the correct block alignment. Especially with (unnamed) pipes this can be tricky.
-If blocks are shifted by just one byte, then all hashes will be different and analyzing two streams will result zero deduplication effect.
-
-)";
-
 

@@ -122,13 +122,11 @@ const char * version_info  =
 const char * title_info = " - The Quick & Dirty Dedupe Analyzer\n"
   "Use for educational purposes only - actual array reduction results may vary\n";
 
-extern const char* qdda_longhelp;
 extern const char* manpage_head;
 extern const char* manpage_body;
 
 void showtitle()   { if(!g_quiet) cout << "qdda " << PROGVERSION << title_info ; }
 void showversion() { showtitle(); std::cout << version_info << std::endl; exit(0); }
-void longhelp()    { std::cout << qdda_longhelp << std::endl; }
 
 /*******************************************************************************
  * Various
