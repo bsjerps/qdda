@@ -153,8 +153,8 @@ void reportDetail(QddaDB& db) {
   db.filelist.report(cout, "8,-6,-10,-11,18,80");
 
   cout << endl << "Dedupe histogram:" << endl;
-  db.dedupehistogram.report(cout, "12,-12,-18,-12");
+  db.dedupehistogram.report(cout, "8,-12,-12,-12");
 
-  cout << endl << "Compression Histogram (" << db.arrayid << "): " << endl;
-  db.compresshistogram.report(cout, "12,-12,-12,-12,-12");
+  cout << endl << "Compression Histogram (" << db.arrayid.str() << "): " << endl;
+  db.compresshistogram.report(cout, "8,-12,-12,-12,-12");
 }

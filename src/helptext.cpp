@@ -64,24 +64,38 @@ qdda zero:512 random:512 random:256,2 compress:128,4
 Generates a test dataset with 512MiB zeroed, 512MiB uncompressible, unique data, 256MiB uncompressible data used twice, and 128MiB 
 compressible data with 4 copies each.
 .P
-Array definition:
+
+.SH STORAGE ARRAYS
+Currently qdda supports 3 storage arrays:
 .br
-Currently qdda supports XtremIO x1, XtremIO x2 and VMAX AFA compression types. The compress and hash algorithms are different from
-these actual arrays and the results are a (close) approximation of the real array data reduction.
-Currently the definitions are as follows:
+.IP XtremIO\ X1\ (--array=x1)
+The first generation XtremIO with 8KB block size and compression bucket sizes 2K, 4K, 8K. As XtremIO performs all compression and dedupe
+operations inline, the results of qdda for dedupe should match the array dedupe very closely. XtremIO uses a proprietary compression
+algorithm which has a slightly lower compression ratio compared to LZ4, but claims to be much faster. 
+This means the qdda results are slightly over-optimistic. The differences are too small however to be a major issue.
+.IP XtremIO\ X2\ (--array=x2)\ (default)
+With the X2, the internal blocksize was increased to 16KiB and many more (15) compression bucket sizes are available: 1K up to 16K with
+1K increments, where 15K is missing because in XtremIO X2 architecture it would allocate the same capacity as 16K uncompressed. 
+The larger block size and more variations in buckets makes XtremIO compression much more effective. 
+There is still a slight difference in compression ratio due to LZ4 versus the native XtremIO algorithm.
+.IP VMAX\ All-Flash\ (--array=vmax1)
+VMAX data reduction estimates are currently 
+.B EXPERIMENTAL.
+.br
+VMAX compresses data using 128K chunks which get compressed in bucket sizes from 8K up to 128K with 8K increments. Not all bucket sizes are
+available at initial configuration and VMAX changes the compression layout dynamically and also avoids compression
+for up to 20% of all data, based on workload and data profile. This makes it hard for qdda to give reasonable estimates which is why
+it is marked as EXPERIMENTAL for now. The output of qdda shows the results at most ideal circumstances (all data gets deduped and
+compressed always). Future versions may improve on accuracy.
 .P
-.TP 12
-.B x1
-XtremIO X1: Blocksize 8K, bucket sizes 2K, 4K and 8K, compression LZ4-default
-.TP
-.B x2
-XtremIO X2: Blocksize 16K, bucket sizes 1,2,3,4,5,6,7,8,9,10,11,12,13,15 and 16K, compression LZ4-default
-.TP
-.B vmax1
-VMAX\ AFA v1: Blocksize 128K, bucket sizes 8,16,24,32,40,48,56,64,72,80,88,96,104,112,120 and 128K, compression LZ4-default (experimental)
-.TP
-.B custom
+The compress and hash algorithms are slightly different from these actual arrays
+and the results are a (close) approximation of the real array data reduction.
+Currently qdda only uses LZ4 (default) compression,
+.P
+.IP custom\ (--array=<custom\ definition>)
 Specify a string with array=name=<name>,bs=<blocksize_kb>,buckets=<bucketsize1+bucketsize2....>
+.br
+example: qdda --array=name=foo,bs=64,buckets=8+16+32+48+64
 .SH ERRORS
 .B qdda
 has basic error handling. Most errors result in simply aborting with an error message and return code.
@@ -148,7 +162,7 @@ Capacity after compressing (deduped) blocks i.e.sum of compressed size of all bl
 Capacity after allocating compressed blocks into buckets. This is the required capacity on an inline dedupe/compress capable storage array
 .IP compressed\ raw
 Capacity required for compressing all raw data (before dedupe) i.e. sum of compressed size of all scanned 
-blocks (before dedupe) - comparable to compression as a stream, such as backup
+blocks
 .IP unique\ data
 Blocks that are unique (cannot be deduped)
 .IP non-unique\ data
@@ -345,28 +359,7 @@ starts a separate reader thread for each given file or stream, and a number of w
 .P
 TBD
 
-.SH STORAGE ARRAYS
-Currently qdda supports 3 storage arrays:
-.br
-.IP XtremIO\ X1
-The first generation XtremIO with 8KB block size and compression bucket sizes 2K, 4K, 8K. As XtremIO performs all compression and dedupe
-operations inline, the results of qdda for dedupe should match the array dedupe very closely. XtremIO uses a proprietary compression
-algorithm which has a slightly lower compression ratio compared to LZ4, but claims to be much faster. 
-This means the qdda results are slightly over-optimistic. The differences are too small however to be a major issue.
-.IP XtremIO\ X2
-With the X2, the internal blocksize was increased to 16KiB and many more (15) compression bucket sizes are available: 1K up to 16K with
-1K increments, where 15K is missing because in XtremIO X2 architecture it would allocate the same capacity as 16K uncompressed. 
-The larger block size and more variations in buckets makes XtremIO compression much more effective. 
-There is still a slight difference in compression ratio due to LZ4 versus the native XtremIO algorithm.
-.IP VMAX\ All-Flash
-VMAX data reduction estimates are currently 
-.B EXPERIMENTAL.
-.br
-VMAX compresses data using 128K chunks which get compressed in bucket sizes from 8K up to 128K with 8K increments. Not all bucket sizes are
-available at initial configuration and VMAX changes the compression layout dynamically and also avoids compression
-for up to 20% of all data, based on workload and data profile. This makes it hard for qdda to give reasonable estimates which is why
-it is marked as EXPERIMENTAL for now. The output of qdda shows the results at most ideal circumstances (all data gets deduped and
-compressed always). Future versions may improve on accuracy.
+
 
 .SH EXPLANATION
 How qdda works:
@@ -582,15 +575,6 @@ const char* qdda_longhelp = R"(
 Adding new streams/files to an existing database:
 
 Use the "-a" (append) option to avoid overwriting (deleting) the existing database.
-
-Extended reports:
-
-The -x (extended reports) option provides deep insight in deduplication and compression. 
-
-The deduplication histogram shows detailed distribution of dedupe counts i.e. how many unique blocks are in the dataset, etc.
-The Compression histogram shows the detailed compress bucket allocation for a given compression method.
-
-
 
 Custom queries:
 

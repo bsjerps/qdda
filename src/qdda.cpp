@@ -514,7 +514,7 @@ int main(int argc, char** argv) {
   opts.add("workers"  , 0 , "<wthreads>"   , p.workers,    "number of worker threads");
   opts.add("readers"  , 0 , "<rthreads>"   , p.readers,    "(max) number of reader threads");
   opts.add("findhash" , 0 , "<hash>"       , p.searchhash, "find blocks with hash=<hash> in staging db");
-  opts.add("tophash"  , 0 , "<amount>"     , p.tophash,    "show top <amount> hashes by refcount");
+  opts.add("tophash"  , 0 , "<num>"        , p.tophash,    "show top <num> hashes by refcount");
   opts.add("mandump"  , 0 , ""             , p.do_mandump, "dump raw manpage to stdout");
 #ifdef __DEBUG
   opts.add("buffers"  , 0 , "<buffers>"    , p.buffers,    "number of buffers (debug only!)");

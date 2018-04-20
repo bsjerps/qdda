@@ -473,17 +473,18 @@ QddaDB::QddaDB(const string& fn): Database(fn),
   allocatedblocks       (db,"select sum(blocks) from v_compressed"),
   zeroblocks            (db,"select blocks from kv where hash=0"),
   totalblocks           (db,"select sum(blocks) from kv"),
-  uniqueblocks          (db,"select count from m_sums_deduped where ref=1"),
-  nonuniqblocks         (db,"select sum(ref*count) from m_sums_deduped where ref>1"),
-  dedupedblocks         (db,"select sum(count) from m_sums_deduped"),
+  uniqueblocks          (db,"select blocks from m_sums_deduped where ref=1"),
+  nonuniqblocks         (db,"select sum(ref*blocks) from m_sums_deduped where ref>1"),
+  dedupedblocks         (db,"select sum(blocks) from m_sums_deduped"),
   bytescompressedraw    (db,"select sum(raw) from m_sums_compressed"),
   bytescompressednet    (db,"select sum(bytes) from m_sums_compressed"),
-  usedblocks            (db,"select sum(ref*count) from m_sums_deduped"),
+  usedblocks            (db,"select sum(ref*blocks) from m_sums_deduped"),
   rows                  (db,"select count(*) from kv"),
   compresshistogram(db,"select * from v_compressed union all\n"
-                       "select 'Total:', sum(buckets), sum(blocks),sum(MiB) from v_compressed"),
+                       "select 'Total:', sum(buckets), sum(perc), sum(blocks), sum(MiB) from v_compressed"),
   dedupehistogram(db,"select * from v_deduped union all \n"
-                     "select 'Total:',sum(blocks),sum(bytes),sum(MiB) from v_deduped"),
+                     "select 'Total:',sum(blocks), sum(perc),sum(MiB) from v_deduped"),
+
   q_loadbuckets         (db,"insert or replace into buckets values (?)"),
   q_truncbuckets        (db,"delete from buckets"),
   filelist              (db,"select * from v_files"),
@@ -525,47 +526,46 @@ select id as file
 from files;
 
 CREATE VIEW IF NOT EXISTS v_sums_deduped as
-select blocks ref, count(blocks) count
+select blocks ref, count(blocks) blocks
 from kv where hash!=0 group by 1 order by ref;
 
 CREATE VIEW IF NOT EXISTS v_sums_compressed as
--- select 0 size, blocks, 0 bytes, 0 rawbytes from kv where hash=999 union all
-select ((bytes-1)/1024)+1 size,count(*) blocks, sum(bytes) bytes, sum(bytes*blocks) raw
+select ((bytes-1)/1024)+1 size,count(*) blocks
+, sum(bytes) bytes
+, sum(bytes*blocks) raw
 from kv where hash!=0 group by (bytes-1)/1024;
--- select 0 bucksz, blocks, 0 bytes, 0 rawbytes from kv where hash=0 union all
 
 CREATE TABLE m_sums_deduped as select * from v_sums_deduped where 1=0;
 CREATE TABLE m_sums_compressed as select * from v_sums_compressed where 1=0;
 
-CREATE VIEW IF NOT EXISTS v_bucket_compressed as 
-select (select max(bucksz) from buckets) blksz
-, (select min(bucksz) from buckets where bucksz >= m_sums_compressed.size) as size
-, sum(blocks) sum 
-from m_sums_compressed group by 2;
-
-CREATE VIEW IF NOT EXISTS v_compressed as 
-WITH temp(size, blksz, buckets, blocks) as (select size
+CREATE VIEW IF NOT EXISTS v_bucket_compressed as
+WITH data(blksz,total) as (select (select max(bucksz) from buckets),(select sum(blocks) from m_sums_compressed))
+select 
+(select min(bucksz) from buckets where bucksz >= m_sums_compressed.size) size
 , blksz
-, sum buckets
-, (size*sum+blksz-1)/blksz blocks
-from v_bucket_compressed)
-select size, buckets, blocks, blocks*blksz/1024.0 MiB from temp;
+, total
+, sum(blocks) blocks
+from m_sums_compressed,data group by 1;
 
-CREATE VIEW IF NOT EXISTS v_deduped as 
-WITH blksz(bytes) as (select blksz*1024 from metadata)
+CREATE VIEW IF NOT EXISTS v_deduped as
+WITH data(blksz,sum) as (select (select blksz*1024 from metadata),(select sum(blocks) from kv))
 select 0 dup
 , blocks
-, blksz.bytes*blocks bytes
-, blksz.bytes*blocks/1048576.0 MiB
-from kv,blksz where hash=0 union all
+, 100.0*blocks/sum perc
+, blksz*blocks/1048576.0 MiB
+from kv,data where hash=0 union all
 select ref
-, count*ref blocks
-, blksz.bytes*ref*count bytes
-, blksz.bytes*ref*count/1048576.0 MiB
-from m_sums_deduped,blksz;
+, blocks*ref blocks
+, 100.0*blocks*ref/sum
+, blksz*ref*blocks/1048576.0 MiB
+from m_sums_deduped,data;
 
+CREATE VIEW IF NOT EXISTS v_compressed as
+WITH temp(size, blksz, buckets, blocks, perc) as (
+select size, blksz, blocks, (size*blocks+blksz-1)/blksz, 100.0*blocks/total
+from v_bucket_compressed)
+select size, buckets, perc, blocks, blocks*blksz/1024.0 MiB from temp;
 )");
-
 }
 
 /*******************************************************************************
