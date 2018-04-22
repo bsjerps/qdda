@@ -1,7 +1,7 @@
 %define date	%(date +"%m%d%H%M")
 Summary:	the quick & dirty dedupe analyzer
 Name:		qdda
-Version:	2.0.0
+Version:	2.0.1
 Release:	1%{?prerel:.~%prerel}
 URL:		https://github.com/outrunnl/qdda
 Source0:	%{name}-%{version}.tbz2
