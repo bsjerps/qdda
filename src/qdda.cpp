@@ -78,7 +78,7 @@ ulong starttime = epoch(); // start time of program
 ofstream c_debug; // Debug stream
 
 FileData::FileData(const string& file) {
-  ratio=0; limit_mb=1024;
+  ratio=0; limit_mb=0;
   stringstream ss(file);
   string strlimit,strrepeat;
 
