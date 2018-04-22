@@ -59,6 +59,9 @@ clean:
 src:	allclean
 	tar -jcvf $(HOME)/SOURCES/qdda-$(version).tbz2 --transform "s|^|qdda/|" *
 
+zip:	all
+	zip ../download/qdda-$(version).zip qdda
+
 allclean:
 	rm -rf *.o */*.o qdda
 
