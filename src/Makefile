@@ -9,10 +9,11 @@
 prefix     = /usr/local
 mandir     = $(prefix)/share/man
 datadir    = $(prefix)/share
+SRCDIR     = $(shell rpm --eval %_sourcedir)
 
 version    = $(shell awk '/^Version:/ {print $$NF}' ../qdda.spec)
-CXXFLAGS  += -std=c++0x -DVERSION=$(version)
 CFLAGS    += -O3
+CXXFLAGS  += -std=c++0x -DVERSION=$(version)
 LIBS       = -lpthread -lstdc++ -ldl
 OBJECTS    = sqlite/sqlite3.o
 OBJECTS   += md5/md5.o
@@ -24,7 +25,7 @@ OBJECTS   += lz4/lz4.o
 all: qdda
 
 qdda: qdda.o database.o tools.o output.o threads.o helptext.o $(OBJECTS)
-	g++ $(LDFLAGS) qdda.o database.o tools.o helptext.o threads.o output.o $(OBJECTS) $(LIBS) $(STATIC) -o qdda 
+	g++ $(LDFLAGS) qdda.o database.o tools.o helptext.o threads.o output.o $(OBJECTS) $(LIBS) -o qdda 
 
 qdda.o: qdda.cpp tools.h qdda.h database.h
 	g++ -c $(CXXFLAGS) $(CFLAGS) qdda.cpp
@@ -54,13 +55,16 @@ helptext.o: helptext.cpp
 	g++ -c $(CXXFLAGS) $(CFLAGS) helptext.cpp
 
 clean:
-	rm -rf *.o qdda
+	rm -rf *.o qdda $(SRCDIR)/qdda-$(version).tbz2
 
 src:	allclean
-	tar -jcvf $(HOME)/SOURCES/qdda-$(version).tbz2 --transform "s|^|qdda/|" *
+	tar -jcvf $(SRCDIR)/qdda-$(version).tbz2 --transform "s|^|qdda/|" *
 
 zip:	all
 	zip ../download/qdda-$(version).zip qdda
+
+rpm:	src
+	cd .. ; rpmbuild -ba qdda.spec
 
 allclean:
 	rm -rf *.o */*.o qdda

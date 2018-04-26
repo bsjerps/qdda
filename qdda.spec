@@ -1,4 +1,3 @@
-%define date	%(date +"%m%d%H%M")
 Summary:	The quick & dirty dedupe analyzer
 Name:		qdda
 Version:	2.0.2
@@ -16,13 +15,15 @@ XtremIO X1 and X2 as well as VMAX AFA (experimental).
 
 %prep
 %setup -q -n %{name}
+
 %build
-make clean
+make -j4 version=%{version}
+
 %install
 rm -rf %{buildroot}
 mkdir %{buildroot}
 
-%makeinstall -j4
+%makeinstall
 
 %files
 %defattr(0755,root,root)
