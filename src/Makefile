@@ -9,7 +9,7 @@
 prefix     = /usr/local
 mandir     = $(prefix)/share/man
 datadir    = $(prefix)/share
-SRCDIR     = $(shell rpm --eval %_sourcedir)
+SRCDIR    := $(shell rpm --eval %_sourcedir 2>/dev/null)
 
 version    = $(shell awk '/^Version:/ {print $$NF}' ../qdda.spec)
 CFLAGS    += -O3
@@ -55,10 +55,18 @@ helptext.o: helptext.cpp
 	g++ -c $(CXXFLAGS) $(CFLAGS) helptext.cpp
 
 clean:
-	rm -rf *.o qdda $(SRCDIR)/qdda-$(version).tbz2
+	rm -rf *.o qdda
+ifdef SRCDIR
+	rm -f $(SRCDIR)/qdda-$(version).tbz2
+endif
 
 src:	allclean
+ifdef SRCDIR
 	tar -jcvf $(SRCDIR)/qdda-$(version).tbz2 --transform "s|^|qdda/|" *
+else
+	@echo RPM not installed, skipping
+	@exit 10
+endif
 
 zip:	all
 	zip ../download/qdda-$(version).zip qdda

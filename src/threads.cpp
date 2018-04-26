@@ -216,7 +216,7 @@ void updater(int thread, SharedData& sd, Parameters& parameters) {
     if(!parameters.dryrun)
       for(int j=0; j<sd.v_databuffer[i].used; j++)
         sd.p_sdb->insertdata(sd.v_databuffer[i].v_hash[j],sd.v_databuffer[i].v_bytes[j]);
-    sd.v_databuffer[i].reset();
+//    sd.v_databuffer[i].reset();
     sd.rb.clear(i);
   }
   sd.p_sdb->end();
@@ -252,6 +252,7 @@ ulong readstream(int thread, SharedData& shared, FileData& fd) {
 
     for(int j=0;j<(fd.repeat?fd.repeat:1);j++) { // repeat processing the same buffer to simulate duplicates, usually repeat == 1
       rc = shared.rb.getfree(i);
+      shared.v_databuffer[i].reset();
       if(rc) break;
       memcpy(shared.v_databuffer[i].readbuf,readbuf,iosize);
       shared.v_databuffer[i].used = blocks;
