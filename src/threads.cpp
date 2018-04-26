@@ -207,19 +207,19 @@ void updater(int thread, SharedData& sd, Parameters& parameters) {
   pthread_setname_np(pthread_self(),"qdda-updater");
   size_t i=0;
   int rc;
+  sd.p_sdb->begin();
   while(true) {
     if(g_abort) break;
     rc = sd.rb.getused(i);
     if(rc) break;
     if(g_abort) return;
-    sd.p_sdb->begin();   
     if(!parameters.dryrun)
       for(int j=0; j<sd.v_databuffer[i].used; j++)
         sd.p_sdb->insertdata(sd.v_databuffer[i].v_hash[j],sd.v_databuffer[i].v_bytes[j]);
-    sd.p_sdb->end();
     sd.v_databuffer[i].reset();
     sd.rb.clear(i);
   }
+  sd.p_sdb->end();
 }
 
 // read a stream(file) into available buffers
