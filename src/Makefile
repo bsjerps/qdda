@@ -73,5 +73,8 @@ install: qdda
 	cp share/* $(datadir)/qdda
 	$(prefix)/bin/qdda --mandump >$(mandir)/man1/qdda.1
 
+tag:
+	git tag v$(version)
+
 .PHONY: install
 
