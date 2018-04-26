@@ -31,8 +31,8 @@ extern bool g_debug;
 extern bool g_quiet;
 extern bool g_abort;
 
-const int kextra_buffers = 8;
-const size_t kbufsize = 1024;
+const int kextra_buffers = 32;
+const size_t kbufsize    = 1024;
 
 DataBuffer::DataBuffer(ulong blocksize, ulong blocksps) {
   blocksize_bytes = blocksize * 1024;

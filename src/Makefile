@@ -9,8 +9,8 @@
 prefix     = /usr/local
 mandir     = $(prefix)/share/man
 datadir    = $(prefix)/share
-version    = 2.0.2
 
+version    = $(shell awk '/^Version:/ {print $$NF}' ../qdda.spec)
 CXXFLAGS  += -std=c++0x -DVERSION=$(version)
 CFLAGS    += -O3
 LIBS       = -lpthread -lstdc++ -ldl
