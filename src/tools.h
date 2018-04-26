@@ -25,6 +25,10 @@ struct option;
  * Debugging and messaging
  ******************************************************************************/
 
+// For converting -DVERSION=x.y.z to string
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
+
 #ifdef __DEBUG
 void dumpvars_exp(const char* names, int, ...);
 void debugMsg(const char*, int); // show line and filename

@@ -27,6 +27,8 @@
  * 1.9.0 - Added 128K compression support, split primary and staging DB, 
  *         code cleanup, minor bugfixes, experimental VMAX compression
  * 2.0.0 - Multithreading and rewrite
+ * 2.0.1 - Bugfix max filesize
+ * 2.0.2 - Dynamic version strings
  * ---------------------------------------------------------------------------
  * Build notes: Requires lz4 >= 1.7.1
  ******************************************************************************/
@@ -59,9 +61,13 @@ using namespace std;
  * global parameters - modify at own discretion
  ******************************************************************************/
 
-const char* PROGVERSION   = "2.0.0" RELEASE;
-const char* kdefault_array = "x2";
+#if defined(VERSION)
+const char* PROGVERSION = TOSTRING(VERSION) RELEASE;
+#else
+const char* PROGVERSION = "0.0.1";
+#endif
 
+const char* kdefault_array = "x2";
 const int kdefault_bandwidth = 200;
 const int kmax_reader_threads = 32;
 

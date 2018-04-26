@@ -9,9 +9,9 @@
 prefix     = /usr/local
 mandir     = $(prefix)/share/man
 datadir    = $(prefix)/share
-version    = 2.0.1
+version    = 2.0.2
 
-CXXFLAGS  += -std=c++0x
+CXXFLAGS  += -std=c++0x -DVERSION=$(version)
 CFLAGS    += -O3
 LIBS       = -lpthread -lstdc++ -ldl
 OBJECTS    = sqlite/sqlite3.o
