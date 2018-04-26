@@ -287,7 +287,7 @@ void merge(QddaDB& db, Parameters& parameters) {
     if(!g_quiet) cout << " in "
       << stopwatch.seconds() << " sec (" 
       << merge_rps << " blocks/s, " 
-      << merge_mbps << " MiB/s)\n" << endl;
+      << merge_mbps << " MiB/s)" << endl;
   }
   Database::deletedb(parameters.stagingname);
 }

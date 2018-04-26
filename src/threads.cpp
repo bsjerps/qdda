@@ -362,8 +362,9 @@ void analyze(v_FileData& filelist, QddaDB& db, Parameters& parameters) {
 
   stopwatch.lap();
   stringstream ss;
-  ss << " Scanned in " << stopwatch.seconds() << " seconds" << endl << flush;
+  ss << " Scanned in " << stopwatch.seconds() << " seconds";
   progress(sd.blocks, sd.blocksize, sd.bytes, ss.str().c_str());
+  if(!g_quiet) cout << endl;
   ulong sumblocks = 0;
   ulong sumbytes = 0;
   for(int i=0;i<sd.rb.getsize();i++) {
