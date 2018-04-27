@@ -9,12 +9,11 @@
 prefix     = /usr/local
 mandir     = $(prefix)/share/man
 datadir    = $(prefix)/share
-# SRCDIR    := $(shell rpm --eval %_sourcedir 2>/dev/null)
 RPM       := $(shell rpm --version 2>/dev/null)
 
 version    = $(shell awk '/^Version:/ {print $$NF}' ../qdda.spec)
-CFLAGS    += -O3
 CXXFLAGS  += -std=c++0x -DVERSION=$(version)
+CFLAGS    += -O3
 LIBS       = -lpthread -lstdc++ -ldl
 OBJECTS    = sqlite/sqlite3.o
 OBJECTS   += md5/md5.o
@@ -64,12 +63,15 @@ ifndef RPM
 	@exit 10
 endif
 
+# Create the archive for rpmbuild
 src:	checkrpm allclean
 	tar -jcf $$(rpm --eval %_sourcedir)/qdda-$(version).tbz2 --transform "s|^|qdda/|" *
 
+# Create zipfile for download
 zip:	all
 	zip ../download/qdda-$(version).zip qdda
 
+# Build the RPM from archive made in 'src' section
 rpm:	checkrpm src
 	cd .. ; rpmbuild -ba qdda.spec
 
