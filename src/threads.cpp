@@ -37,7 +37,7 @@ const size_t kbufsize    = 1024;
 DataBuffer::DataBuffer(ulong blocksize, ulong blocksps) {
   blocksize_bytes = blocksize * 1024;
   bufsize      = blocksize_bytes * blocksps;
-  readbuf      = new char[bufsize];
+  readbuf      = new char[bufsize]();
   used         = 0;
   blocks       = 0;
   bytes        = 0;
@@ -46,7 +46,7 @@ DataBuffer::DataBuffer(ulong blocksize, ulong blocksps) {
 }
 
 DataBuffer::~DataBuffer() { delete[] readbuf; }
-void DataBuffer::reset()  { memset(readbuf,0,bufsize); used=0;}
+void DataBuffer::reset()  { used = 0; }
 
 // access to the nth block in the buffer
 char* DataBuffer::operator[](int n) {
@@ -107,7 +107,7 @@ RingBuffer::RingBuffer(size_t sz) {
   mx_buffer.resize(sz);
 }
 
-void RingBuffer::clear(size_t ix) {
+void RingBuffer::release(size_t ix) {
   mx_buffer[ix].unlock();
 }
 
@@ -216,8 +216,8 @@ void updater(int thread, SharedData& sd, Parameters& parameters) {
     if(!parameters.dryrun)
       for(int j=0; j<sd.v_databuffer[i].used; j++)
         sd.p_sdb->insertdata(sd.v_databuffer[i].v_hash[j],sd.v_databuffer[i].v_bytes[j]);
-//    sd.v_databuffer[i].reset();
-    sd.rb.clear(i);
+        sd.v_databuffer[i].reset();
+    sd.rb.release(i);
   }
   sd.p_sdb->end();
 }
@@ -248,15 +248,17 @@ ulong readstream(int thread, SharedData& shared, FileData& fd) {
     bytes     = fd.ifs->gcount();
     blocks    = bytes / blocksize / 1024; // amount of full blocks
               + bytes%blocksize*1024?1:0; // partial block read, add 1
-    totbytes += bytes;    
+    totbytes += bytes;
+
+    if(bytes<iosize)  // if we reached eof, clear rest of the buffer
+      memset(readbuf + bytes, 0, iosize - bytes);
 
     for(int j=0;j<(fd.repeat?fd.repeat:1);j++) { // repeat processing the same buffer to simulate duplicates, usually repeat == 1
       rc = shared.rb.getfree(i);
-      shared.v_databuffer[i].reset();
       if(rc) break;
       memcpy(shared.v_databuffer[i].readbuf,readbuf,iosize);
       shared.v_databuffer[i].used = blocks;
-      shared.rb.clear(i);
+      shared.rb.release(i);
     }
     if(fd.limit_mb && totbytes >= fd.limit_mb*1048576) break; // end if we only read a partial file
   }
@@ -314,7 +316,7 @@ void worker(int thread, SharedData& sd, Parameters& parameters) {
       }
       sd.mx_output.unlock();
     }
-    sd.rb.clear(i);
+    sd.rb.release(i);
   }
   delete[] dummy;
 }

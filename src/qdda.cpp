@@ -156,7 +156,7 @@ void showversion() { showtitle(); std::cout << version_info << std::endl; exit(0
  ******************************************************************************/
 
 // returns the least significant 7 bytes of the md5 hash (16 bytes) as unsigned long
-ulong hash_md5(const char * src, char* zerobuf, const int size) {
+uint64_t hash_md5(const char * src, char* zerobuf, const int size) {
   unsigned char digest[16];
   memset(zerobuf,0,size);      // initialize buf with zeroes
   if(memcmp (src,zerobuf,size)==0) return 0;         // return 0 for zero block

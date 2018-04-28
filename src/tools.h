@@ -75,7 +75,7 @@ inline int   minint(int x, int y)            { return x<y?x:y; };
 inline float safeDiv_float(float x, float y) { return (y==0) ? 0 : x / y; }  // safe divide (just returns 0 if div by zero)
 inline ulong safeDiv_ulong(ulong x, ulong y) { return (y==0) ? 0 : x / y; }  // same for ulong
 inline ulong divRoundUp(ulong x, ulong y)    { return (x%y) ? x/y+1 : x/y; } // long integer division but round up instead of round down
-inline ulong longRand()                      { return ((ulong)rand() << 32) + rand() ; }  // 64-bit ulong random
+inline uint64_t longRand()                   { return ((uint64_t)rand() << 32) + rand() ; }  // 64-bit ulong random
 
 
 /*******************************************************************************

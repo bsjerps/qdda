@@ -65,7 +65,7 @@ public:
   int getfree(size_t& ix);
   int getfull(size_t& ix);
   int getused(size_t& ix);
-  void clear(size_t ix);
+  void release(size_t ix);
   bool done;
   size_t getsize() { return size;}
   void print();

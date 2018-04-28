@@ -26,10 +26,9 @@ typedef std::vector<FileData> v_FileData;
 class Filelist;
 class Parameters;
 
-ulong hash_md5(const char* src, char* zerobuf, const int size);
+uint64_t hash_md5(const char* src, char* zerobuf, const int size);
 u_int compress(const char * src,char * buf, const int size);
 
-//void analyze(Filelist& filelist, QddaDB& db, Parameters& parameters);
 void analyze(v_FileData& filelist, QddaDB& db, Parameters& parameters);
 
 void report(QddaDB& db);
