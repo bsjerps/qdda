@@ -61,7 +61,7 @@ private:
 // Class to hold the structure of the SQLite database and various statements
 class Database {
 public:
-  Database(const string& fn);
+  explicit Database(const string& fn);
   ~Database();
   const char*  filename();
   ulong        filesize();
@@ -83,17 +83,19 @@ protected:
   void         sql(const string& query);
   sqlite3* db;           // global sqlite database
   string   tmpdir;       // SQLITE_TMPDIR
+private:
+  Database(const Database&) = delete;
 };
 
 class StagingDB: public Database {
 public:
-  StagingDB(const string& fn);
+  explicit StagingDB(const string& fn);
  ~StagingDB(); 
   static void createdb(const string& fn, ulong blocksize);
   int         fillrandom(ulong rows, int blocksize, int dup);
   int         fillzero(ulong rows);
   void        insertdata(ulong, ulong);
-  int         insertmeta(const string name, ulong blocks, ulong bytes);
+  int         insertmeta(const string& name, ulong blocks, ulong bytes);
   Query blocksize;
   Query rows;
   Query setblocksize;
@@ -106,7 +108,7 @@ public:
 
 class QddaDB: public Database {
 public:
-  QddaDB(const string& fn);
+  explicit QddaDB(const string& fn);
   static void  createdb(const string& fn);
   void         loadbuckets(const string&);
   void         import(const string&);

@@ -113,7 +113,7 @@ const char* hostName() {
 const char* whoAmI() {
   static char buf[1024];
   memset(buf, 0, sizeof(buf));
-  int rc = readlink("/proc/self/exe",buf,1024);
+  if(!readlink("/proc/self/exe",buf,1024)) die ("Cannot determine path");
   return buf;
 }
 
@@ -164,8 +164,7 @@ const string& StringArray::operator[](int i) {
 
 // Dump the entire array to ostream
 std::ostream& operator<<(std::ostream& stream, StringArray& s) {
-  std::vector<string> v_string;
-  for(std::vector<string>::iterator i = s.v_string.begin(); i != s.v_string.end(); i++)
+  for(std::vector<string>::iterator i = s.v_string.begin(); i != s.v_string.end(); ++i)
     stream << *i << std::endl;
   return stream;
 }

@@ -90,10 +90,10 @@ void report(QddaDB& db) {
   ulong blocks_dedup     = db.dedupedblocks;            // Unique hashes (deduped) between 0 and max
   ulong blocks_alloc     = db.allocatedblocks;          // blocks required after bucket compression
   ulong blocks_unique    = db.uniqueblocks;             // Hashes with count=1 (non-dedupable data)
-  ulong blocks_nuniq     = db.nonuniqblocks;              // count>1 (dedupable data)
-  ulong bytes_compr_raw  = db.bytescompressedraw; // compressed bytes before dedup
-  ulong bytes_compr_net  = db.bytescompressednet; // compressed bytes after dedup
-  ulong blocks_merged    = blocks_used - blocks_dedup; // blocks saved by dedup
+  ulong blocks_nuniq     = db.nonuniqblocks;            // count>1 (dedupable data)
+  ulong bytes_compr_raw  = db.bytescompressedraw;       // compressed bytes before dedup
+  ulong bytes_compr_net  = db.bytescompressednet;       // compressed bytes after dedup
+  ulong blocks_merged    = blocks_used - blocks_dedup;  // blocks saved by dedup
 
   // ratios & percentages - divide by zero -> 0
   float perc_used   = safeDiv_float (blocks_used,  blocks_total); // percentage used / raw
@@ -104,11 +104,9 @@ void report(QddaDB& db) {
 
   float perc_compr_raw = 1 - safeDiv_float (bytes_compr_raw,  blocks_used*blocksize*1024);  // compression ratio before dedupe
   float perc_postdedup = 1 - safeDiv_float (bytes_compr_net,  blocks_dedup*blocksize*1024); // compression ratio after dedupe
-  float perc_compr     = 1 - safeDiv_float (blocks_alloc, blocks_dedup);                    // compression ratio after allocation
   
   float ratio_total = ratio_dedup*ratio_compr*ratio_thin; // overall storage reduction
-
-  float filesize = fileSize(db.filename()) * bytes2mb; // file size in MiB
+  float filesize    = fileSize(db.filename()) * bytes2mb; // file size in MiB
 
 
 // add explanation row

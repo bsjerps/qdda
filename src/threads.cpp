@@ -35,14 +35,15 @@ const int kextra_buffers = 32;
 const size_t kbufsize    = 1024;
 
 DataBuffer::DataBuffer(ulong blocksize, ulong blocksps) {
+  size = blocksps;
   blocksize_bytes = blocksize * 1024;
   bufsize      = blocksize_bytes * blocksps;
   readbuf      = new char[bufsize]();
   used         = 0;
   blocks       = 0;
   bytes        = 0;
-  v_hash.resize(blocksps);
-  v_bytes.resize(blocksps);
+  v_hash.resize(size);
+  v_bytes.resize(size);
 }
 
 DataBuffer::~DataBuffer() { delete[] readbuf; }
@@ -206,11 +207,10 @@ int RingBuffer::getused(size_t& ix) {
 void updater(int thread, SharedData& sd, Parameters& parameters) {
   pthread_setname_np(pthread_self(),"qdda-updater");
   size_t i=0;
-  int rc;
   sd.p_sdb->begin();
   while(true) {
     if(g_abort) break;
-    rc = sd.rb.getused(i);
+    int rc = sd.rb.getused(i);
     if(rc) break;
     if(g_abort) return;
     if(!parameters.dryrun)
@@ -246,8 +246,8 @@ ulong readstream(int thread, SharedData& shared, FileData& fd) {
         memcpy(readbuf + (i* blocksize * 1024), zerobuf, abs(rand())%(blocksize*1024));
 
     bytes     = fd.ifs->gcount();
-    blocks    = bytes / blocksize / 1024; // amount of full blocks
-              + bytes%blocksize*1024?1:0; // partial block read, add 1
+    blocks    = bytes / blocksize / 1024;         // amount of full blocks
+    blocks   += (bytes % blocksize*1024 ? 1 : 0); // partial block read, add 1
     totbytes += bytes;
 
     if(bytes<iosize)  // if we reached eof, clear rest of the buffer
@@ -289,13 +289,13 @@ void worker(int thread, SharedData& sd, Parameters& parameters) {
   string self = "qdda-worker-" + toString(thread,0);
   pthread_setname_np(pthread_self(), self.c_str());
   const ulong blocksize = sd.blocksize;
-  char*  dummy    = new char[blocksize*1024];
-  size_t i=0;
-  ulong  hash,bytes;
-  int rc;
+  char* dummy           = new char[blocksize*1024];
+  size_t i              = 0;
+  uint64_t hash;
+  ulong bytes;
   while (true) {
     if(g_abort) break;
-    rc = sd.rb.getfull(i);
+    int rc = sd.rb.getfull(i);
     if(rc) break;
     for(int j=0; j < sd.v_databuffer[i].used; j++) {
       if(g_abort) return;

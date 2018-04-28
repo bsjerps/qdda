@@ -43,12 +43,13 @@ void  progress(ulong blocks,ulong blocksize, ulong bytes, const char * msg = NUL
 
 class FileData {
 public:
-  FileData(const string& name);
+  explicit FileData(const string& name);
   std::ifstream* ifs;
-  string filename;
-  ulong limit_mb;
-  int repeat;
-  int ratio;
+  string         filename;
+  ulong          limit_mb;
+  int            repeat;
+  int            ratio;
+private:
 };
 
 // Parameter set to pass between functions
@@ -58,7 +59,6 @@ struct Parameters {
   string tmpdir;
   string array;
   string import;
-  //string testopts;
   ulong searchhash;
   int  bandwidth; // default bandwidth throttle (MB/s)
   int  workers;   // number of workers (threads)

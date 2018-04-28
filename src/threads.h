@@ -33,10 +33,11 @@ private:
 // to be processed by the worker
 class DataBuffer {
 public:
-  DataBuffer(ulong, ulong);
+  explicit DataBuffer(ulong, ulong);
  ~DataBuffer();
   void  reset();           // clear buffer and temp counters;
   char* operator[](int n); // access to the nth block in the buffer
+  size_t size;
   ulong bufsize;           // size of the read buffer in bytes
   int   used;              // number of used blocks in the buffer
   ulong blocks;            // blocks read
@@ -46,12 +47,13 @@ public:
   std::vector<ulong> v_bytes;
   ulong blocksize_bytes;
 private:
+  DataBuffer() = delete;
 };
 
 // IOThrottle holds shared data to provide IO bandwidth throttling
 class IOThrottle {
 public:
-  IOThrottle(ulong mibps);  // Initialize with megabytes per sec value
+  explicit IOThrottle(ulong mibps);  // Initialize with megabytes per sec value
   void request(ulong kb);   // request to read a number of 1k blocks
 private:
   ulong      mibps;         // the bandwidth
@@ -61,7 +63,7 @@ private:
 
 class RingBuffer {
 public:
-  RingBuffer(size_t sz);
+  explicit RingBuffer(size_t sz);
   int getfree(size_t& ix);
   int getfull(size_t& ix);
   int getused(size_t& ix);

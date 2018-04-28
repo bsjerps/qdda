@@ -363,7 +363,7 @@ void manpage() {
   string cmd = "(";
   cmd += whoAmI();
   cmd += " --mandump > /tmp/qdda.1 ; man /tmp/qdda.1 ; rm /tmp/qdda.1 )";
-  int rc=system(cmd.c_str());
+  if(!system(cmd.c_str())) { };
 }
 
 const string& defaultDbName() {

@@ -132,6 +132,7 @@ int Query::bind(const ulong p) {
 };
 
 int Query::bind(const char* p) {
+  if(!p) die ("bind string NULL pointer");
   int rc = sqlite3_bind_text (pStmt, ++ref, p, strlen(p),SQLITE_STATIC);
   if(rc==SQLITE_OK) return 0;
   std::cerr << "MySQL bind string, return code: " << rc << "\n";
@@ -311,7 +312,7 @@ int Database::detach(const string& schema) {
 void Database::vacuum() { sql("vacuum"); }
 
 int Database::close() {
-  int rc;
+  int rc = 0;
   if(g_debug) std::cerr << "Closing DB " << filename() << std::endl;
   if(db) rc=sqlite3_close(db);
   db=NULL;
@@ -340,13 +341,14 @@ int Database::exists(const string& fn) {
 }
 
 int Database::deletedb(const string& fn) {
-  int rc = 0;
+  int rc;
   sqlite3* tempdb;
   rc = sqlite3_open_v2(fn.c_str(), &tempdb, SQLITE_OPEN_READONLY, NULL);
   if(rc==0) {
-    rc=sqlite3_close(tempdb);
+    sqlite3_close(tempdb);
     rc=unlink(fn.c_str());
   }
+  return rc;
 }
 
 int Database::unlinkdb() {
@@ -452,7 +454,7 @@ int StagingDB::fillzero(ulong rows) {
   return 0;
 }
 
-int StagingDB::insertmeta(string name, ulong blocks, ulong bytes) {
+int StagingDB::insertmeta(const string& name, ulong blocks, ulong bytes) {
   q_meta.bind(name);
   q_meta.bind(blocks);
   q_meta.bind(hostName());
