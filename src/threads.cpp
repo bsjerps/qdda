@@ -94,9 +94,8 @@ long threadPid() { return (long int)syscall(SYS_gettid); }
 
 // print the thread id (debugging)
 void printthread(std::mutex& mutex, string msg) {
-  mutex.lock();
+  std::lock_guard<std::mutex> lock(mutex);
   if(g_debug) std::cerr << msg << std::endl << std::flush;
-  mutex.unlock();
 }
 
 RingBuffer::RingBuffer(size_t sz) {
@@ -113,17 +112,14 @@ void RingBuffer::release(size_t ix) {
 }
 
 void RingBuffer::print() {
-  #ifndef __DEBUG
-  return;
-  #else
   mx_print.lock();
   cout <<  "T" << setw(4) << tail 
        << " W" << setw(4) << work 
        << " H" << setw(4) << head
        << endl << flush;
   mx_print.unlock();
-  #endif
 }
+
 bool RingBuffer::isFull() {
   std::lock_guard<std::mutex> lock(mx_meta);
   return ((head+1) % size) == tail;
@@ -317,10 +313,6 @@ void worker(int thread, SharedData& sd, Parameters& parameters) {
   }
   delete[] dummy;
 }
-
-/*
- * tbd: look for offsets with a specific hash - replace dump function
- */
 
 // Setup staging DB, worker and reader threads to start data analyzer
 void analyze(v_FileData& filelist, QddaDB& db, Parameters& parameters) {

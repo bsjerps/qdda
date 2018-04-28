@@ -95,6 +95,10 @@ install: qdda
 	cp share/* $(datadir)/qdda
 	$(prefix)/bin/qdda --mandump >$(mandir)/man1/qdda.1
 
+uninstall:
+	rm -f $(prefix)/bin/qdda $(mandir)/man1/qdda.1
+	rm -rf $(datadir)/qdda
+
 tag:
 	git tag v$(version)
 

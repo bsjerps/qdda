@@ -14,6 +14,8 @@
 #include <vector>
 #include <sstream>
 
+#include <stdlib.h> // rand
+
 #include <string.h>
 
 struct option;

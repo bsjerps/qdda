@@ -165,14 +165,14 @@ uint64_t hash_md5(const char * src, char* zerobuf, const int size) {
   MD5_Update(&ctx, src, size);
   MD5_Final(digest, &ctx);
   return                                // ignore chars 0-8
-    ((ulong)(digest[8]&0X0F)  << 56) +  // pick 4 bits from byte 7
-    ((ulong)digest[9]  << 48) +         // all bits from byte 6 to 0
-    ((ulong)digest[10] << 40) +         // convert char* to ulong but keeping
-    ((ulong)digest[11] << 32) +         // the right order, only use lower 6 bytes (char 10-15)
-    ((ulong)digest[12] << 24) +         // SQLite integer is 8 byte signed so we need to stay within
-    ((ulong)digest[13] << 16) +         // 8 bytes and unsigned. 6 bytes is best compromise
-    ((ulong)digest[14] << 8 ) +
-    ((ulong)digest[15]);
+    ((uint64_t)(digest[8]&0X0F)  << 56) +  // pick 4 bits from byte 7
+    ((uint64_t)digest[9]  << 48) +         // all bits from byte 6 to 0
+    ((uint64_t)digest[10] << 40) +         // convert char* to ulong but keeping
+    ((uint64_t)digest[11] << 32) +         // the right order, only use lower 6 bytes (char 10-15)
+    ((uint64_t)digest[12] << 24) +         // SQLite integer is 8 byte signed so we need to stay within
+    ((uint64_t)digest[13] << 16) +         // 8 bytes and unsigned. 6 bytes is best compromise
+    ((uint64_t)digest[14] << 8 ) +
+    ((uint64_t)digest[15]);
 }
 
 // Get compressed bytes for a compressed block - lz4

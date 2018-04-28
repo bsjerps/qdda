@@ -272,7 +272,7 @@ int LongOptions::parse(int argc, char** argv) {
 
 // Signal Handler for SIGINT (i.e. ctrl-c)
 void setabort(int sig_num) {
-  signal(SIGINT, setabort); // no rearm
+  signal(SIGINT, setabort);
   g_abort = true;  
   resetTrap();
 }
