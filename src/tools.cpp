@@ -102,6 +102,9 @@ ulong epoch() {
   return std::chrono::system_clock::now().time_since_epoch().count()/1000000000;
 }
 
+#ifndef HOST_NAME_MAX
+#define HOST_NAME_MAX 64
+#endif
 // Get the (short) hostname
 const char* hostName() {
   static char hostname[HOST_NAME_MAX];
