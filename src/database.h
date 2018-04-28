@@ -11,7 +11,6 @@
 
 #include <string>
 #include <limits.h>
-#include "sqlite/sqlite3.h"
 
 // dirty hack to improve readability
 #define string std::string
@@ -19,13 +18,19 @@
 /*******************************************************************************
  * functions
  ******************************************************************************/
-// string parseFileName(string& in);  // prevent illegal db filenames
 
 int fileIsSqlite3(const char * fn);          // test if file is SQLite3 format
 int fileIsSqlite3(const string& s);     // test if file is SQLite3 format
 
 int fileDeleteSqlite3(const string& s); // same for string type
 int fileDeleteSqlite3(const char * fn);      // delete only if file is SQLite3
+
+/*******************************************************************************
+ * forward decs
+ ******************************************************************************/
+
+struct sqlite3_stmt;
+struct sqlite3;
 
 /*******************************************************************************
  * Query class

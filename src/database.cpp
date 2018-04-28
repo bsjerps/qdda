@@ -22,6 +22,7 @@
 #include <sys/stat.h>
 #include <vector>
 #include <list>
+#include "sqlite/sqlite3.h"
 
 #include "tools.h"
 #include "database.h"
