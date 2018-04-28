@@ -162,7 +162,6 @@ int RingBuffer::getfree(size_t& ix) {
     mx_buffer[ix].lock();
     head = ++head % size; // move head to the next  
   }
-  print();
   return rc;
 }
 
@@ -180,7 +179,6 @@ int RingBuffer::getfull(size_t& ix) {
     mx_buffer[ix].lock();
     work = ++work % size;  // move ptr to next
   }
-  print();
   return rc;
 }
 
@@ -198,7 +196,6 @@ int RingBuffer::getused(size_t& ix) {
     mx_buffer[ix].lock();
     tail = ++tail % size;  // we need the next
   }
-  print();
   return rc;
 }
 
@@ -246,8 +243,8 @@ ulong readstream(int thread, SharedData& shared, FileData& fd) {
         memcpy(readbuf + (i* blocksize * 1024), zerobuf, abs(rand())%(blocksize*1024));
 
     bytes     = fd.ifs->gcount();
-    blocks    = bytes / blocksize / 1024;         // amount of full blocks
-    blocks   += (bytes % blocksize*1024 ? 1 : 0); // partial block read, add 1
+    blocks    = bytes / (blocksize*1024);         // amount of full blocks
+    blocks   += bytes % (blocksize*1024) ? 1 : 0; // partial block read, add 1
     totbytes += bytes;
 
     if(bytes<iosize)  // if we reached eof, clear rest of the buffer
