@@ -58,7 +58,7 @@ public:
 private:
   ulong      mibps;         // the bandwidth
   Stopwatch  stopwatch;     // track time between requests
-  std::mutex mutex;         // thread safe
+  std::mutex mx_throttle;   // thread safe
 };
 
 class RingBuffer {
@@ -80,7 +80,7 @@ private:
   std::mutex tailbusy;
   std::mutex headbusy;
   std::mutex workbusy;
-  std::mutex mx_print;
+//  std::mutex mx_print;
   std::vector<Mutex> mx_buffer;
   size_t head;
   size_t tail;
@@ -93,8 +93,6 @@ class SharedData {
 public:
   SharedData(int buffers, int files, ulong blocksize, StagingDB*, int mibps);
  ~SharedData();
-  void lock()   { mutex.lock(); }
-  void unlock() { mutex.unlock(); }
   std::vector<DataBuffer> v_databuffer;
   RingBuffer              rb;
   ulong                   blocksize;
@@ -102,9 +100,8 @@ public:
   ulong                   cbytes;
   StagingDB*              p_sdb;
   IOThrottle              throttle;
-  Mutex                   mx_output;
-  Mutex*                  filelocks;
   int                     blockspercycle;
-private:
-  std::mutex              mutex;
+  Mutex*                  filelocks;
+  std::mutex              mx_shared;
+//  std::mutex              mx_output;
 };

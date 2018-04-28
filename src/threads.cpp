@@ -8,7 +8,6 @@
  * -----------------------------------------------------------------------------
  ******************************************************************************/
 
-
 #include <iostream>
 #include <fstream>
 #include <iomanip>
@@ -33,6 +32,8 @@ extern bool g_abort;
 
 const int kextra_buffers = 32;
 const size_t kbufsize    = 1024;
+
+std::mutex mx_print;
 
 DataBuffer::DataBuffer(ulong blocksize, ulong blocksps) {
   size = blocksps;
@@ -59,13 +60,12 @@ IOThrottle::IOThrottle(ulong m) { mibps = m; }
 // Request to read x kb, microsleep to match required bandwidth
 void IOThrottle::request(ulong kb) {
   if(!mibps) return; // immediately return if we don't throttle
-  mutex.lock();
+  std::lock_guard<std::mutex> lock(mx_throttle);
   stopwatch.lap();
   ulong microsec = (1024 * kb) / mibps;
   if(microsec > stopwatch)
     usleep(microsec - stopwatch);
   stopwatch.reset();
-  mutex.unlock();
 }
 
 SharedData::SharedData(int buffers, int files, ulong blksz, StagingDB* db, int bw): 
@@ -93,8 +93,8 @@ SharedData::~SharedData() {
 long threadPid() { return (long int)syscall(SYS_gettid); }
 
 // print the thread id (debugging)
-void printthread(std::mutex& mutex, string msg) {
-  std::lock_guard<std::mutex> lock(mutex);
+void printthread(string& msg) {
+  std::lock_guard<std::mutex> lock(mx_print);
   if(g_debug) std::cerr << msg << std::endl << std::flush;
 }
 
@@ -112,12 +112,11 @@ void RingBuffer::release(size_t ix) {
 }
 
 void RingBuffer::print() {
-  mx_print.lock();
+  std::lock_guard<std::mutex> lock(mx_print);
   cout <<  "T" << setw(4) << tail 
        << " W" << setw(4) << work 
        << " H" << setw(4) << head
        << endl << flush;
-  mx_print.unlock();
 }
 
 bool RingBuffer::isFull() {
@@ -299,15 +298,15 @@ void worker(int thread, SharedData& sd, Parameters& parameters) {
       r_blockdata.v_bytes[j] = bytes;
       sd.v_databuffer[i].blocks++;
       sd.v_databuffer[i].bytes += blocksize*1024;
-      sd.lock();
-      sd.blocks++;
-      sd.bytes += blocksize*1024;
-      sd.unlock();
-      sd.mx_output.lock();
+      {
+        std::lock_guard<std::mutex> lock(sd.mx_shared);
+        sd.blocks++;
+        sd.bytes += blocksize*1024;
+      }
       if(sd.blocks%10000==0 || sd.blocks == 10) {
+        std::lock_guard<std::mutex> lock(mx_print);
         progress(sd.blocks, blocksize, sd.bytes);           // progress indicator
       }
-      sd.mx_output.unlock();
     }
     sd.rb.release(i);
   }
