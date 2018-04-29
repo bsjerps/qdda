@@ -10,7 +10,6 @@ prefix     = /usr/local
 mandir     = $(prefix)/share/man
 datadir    = $(prefix)/share
 RPM       := $(shell rpm --version 2>/dev/null)
-MAN2HTML  := $(shell man2html -v 2>/dev/null)
 version    = $(shell awk '/^Version:/ {print $$NF}' ../qdda.spec)
 CXXFLAGS  += -std=c++0x -DVERSION=$(version)
 CFLAGS    += -O3
@@ -84,8 +83,8 @@ rpm:	checkrpm src
 allclean:
 	rm -rf *.o */*.o qdda
 
-html: checkhtml qdda
-	./qdda --mandump | man2html > ../doc/qdda.html
+html: qdda
+	../scripts/gendoc
 
 install: qdda
 	install -m 0755 -d $(prefix)/bin
