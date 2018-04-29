@@ -56,6 +56,10 @@ make install
 Run `qdda -h` for command line options, `qdda -m` for more extensive help.
 Further documentation on the wiki page: http://outrun.nl/wiki/qdda
 
+## Man page
+
+[MAN PAGE](doc/qdda.html)
+
 ## Example
 
 (for qdda 1.9.0, needs to be updated for 2.x)
