@@ -58,7 +58,7 @@ Further documentation on the wiki page: http://outrun.nl/wiki/qdda
 
 ## Man page
 
-[MAN PAGE](doc/qdda.html)
+[MAN PAGE](doc/qdda.md)
 
 ## Example
 
