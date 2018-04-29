@@ -215,17 +215,17 @@ void progress(ulong blocks,ulong blocksize, ulong bytes, const char * msg) {
     prevbytes=bytes;
     filenum++;
   }
-  auto avgsvctm = stopwatch;                               // service time of xx bytes since start of file
-  auto cursvctm = stopwatch - prev;                        // service time of xx bytes since previous call
-  auto avgbw = safeDiv_ulong(bytes,avgsvctm);              // bytes per second since start of file
-  auto curbw = safeDiv_ulong((bytes-prevbytes),cursvctm);  // bytes per second since previous call
-  stringstream ss;                                         // generate a string with the progress message
-  ss << blocks        << " "                               // blocks scanned
-     << blocksize     << "k blocks ("                      // blocksize
-     << bytes/1048576 << " MiB) processed, "               // processed megabytes
-     << curbw << "/"  << avgbw << " MB/s (cur/avg)";       // current/average bandwidth
-  if(msg) ss << msg;                                       // add message if specified
-  ss << "                 " ;                              // blank rest of line
+  auto avgsvctm = stopwatch;                                   // service time of xx bytes since start of file
+  auto cursvctm = stopwatch - prev;                            // service time of xx bytes since previous call
+  auto avgbw = safeDiv_ulong(bytes,avgsvctm);                  // bytes per second since start of file
+  auto curbw = safeDiv_ulong((bytes-prevbytes),cursvctm);      // bytes per second since previous call
+  stringstream ss;                                             // generate a string with the progress message
+  ss << blocks        << " "                                   // blocks scanned
+     << blocksize     << "k blocks ("                          // blocksize
+     << bytes/1048576 << " MiB) processed, "                   // processed megabytes
+     << setw(6) << curbw << "/" << avgbw << " MB/s (cur/avg)"; // current/average bandwidth
+  if(msg) ss << msg;                                           // add message if specified
+  ss << "                 " ;                                  // blank rest of line
   showprogress(ss.str());
   prev=stopwatch;  // save stopwatch time for next call
   prevbytes=bytes; // save byte count for next call

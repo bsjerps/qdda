@@ -303,8 +303,8 @@ void worker(int thread, SharedData& sd, Parameters& parameters) {
         sd.blocks++;
         sd.bytes += blocksize*1024;
       }
+      std::lock_guard<std::mutex> lock(mx_print);
       if(sd.blocks%10000==0 || sd.blocks == 10) {
-        std::lock_guard<std::mutex> lock(mx_print);
         progress(sd.blocks, blocksize, sd.bytes);           // progress indicator
       }
     }
