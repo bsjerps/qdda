@@ -10,6 +10,7 @@ prefix     = /usr/local
 mandir     = $(prefix)/share/man
 datadir    = $(prefix)/share
 RPM       := $(shell rpm --version 2>/dev/null)
+MAN2HTML  := $(shell man2html -v 2>/dev/null)
 version    = $(shell awk '/^Version:/ {print $$NF}' ../qdda.spec)
 CXXFLAGS  += -std=c++0x -DVERSION=$(version)
 CFLAGS    += -O3
@@ -62,6 +63,12 @@ ifndef RPM
 	@exit 10
 endif
 
+checkhtml:
+ifndef MAN2HTML
+	@echo man2html not installed
+	@exit 10
+endif
+
 # Create the archive for rpmbuild
 src:	checkrpm allclean
 	tar -jcf $$(rpm --eval %_sourcedir)/qdda-$(version).tbz2 --transform "s|^|qdda/|" *
@@ -76,6 +83,9 @@ rpm:	checkrpm src
 
 allclean:
 	rm -rf *.o */*.o qdda
+
+html: checkhtml qdda
+	./qdda --mandump | man2html > ../doc/qdda.html
 
 install: qdda
 	install -m 0755 -d $(prefix)/bin
