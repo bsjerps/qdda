@@ -29,7 +29,7 @@
 
 #define string std::string
 
-extern bool g_abort;
+sig_atomic_t g_abort;
 
 // Die with error message
 void die(string errmsg,int rc) { 
@@ -277,7 +277,6 @@ int LongOptions::parse(int argc, char** argv) {
 void setabort(int sig_num) {
   signal(SIGINT, setabort);
   g_abort = true;  
-  resetTrap();
 }
 
 void armTrap() {

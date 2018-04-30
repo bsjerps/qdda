@@ -103,5 +103,5 @@ public:
   int                     blockspercycle;
   Mutex*                  filelocks;
   std::mutex              mx_shared;
-//  std::mutex              mx_output;
+  std::mutex              mx_database;
 };

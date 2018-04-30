@@ -18,6 +18,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/syscall.h>
+#include <signal.h>
 
 #include "tools.h"
 #include "database.h"
@@ -142,61 +143,51 @@ bool RingBuffer::isDone() {
   return false;
 }
 
-
 int RingBuffer::getfree(size_t& ix) {
-  int rc=0;
   if(g_abort) return 2;
   std::lock_guard<std::mutex> lock(headbusy);
   ix = head;
   while (isFull()) {
     usleep(10000);
-    if(isDone()) {rc = 1; break; }
-    if(g_abort) {rc = 2; break; }
+    if(isDone()) return 1;
+    if(g_abort) return 2;
   }
-  if(!rc) {
-    mx_buffer[ix].lock();
-    head = ++head % size; // move head to the next  
-  }
-  return rc;
+  mx_buffer[ix].lock();
+  head = ++head % size; // move head to the next  
+  return 0;
 }
 
 int RingBuffer::getfull(size_t& ix) {
-  int rc=0;
   if(g_abort) return 2;
   std::lock_guard<std::mutex> lock(workbusy);
   ix = work;
   while(!hasData()) {
     usleep(10000);
-    if(isDone()) {rc = 1; break; }
-    if(g_abort) {rc = 2; break; }
+    if(isDone()) return 1;
+    if(g_abort) return 2;
   }
-  if(!rc) {
-    mx_buffer[ix].lock();
-    work = ++work % size;  // move ptr to next
-  }
-  return rc;
+  mx_buffer[ix].lock();
+  work = ++work % size;  // move ptr to next
+  return 0;
 }
 
 int RingBuffer::getused(size_t& ix) {
-  int rc=0;
   if(g_abort) return 2;
   std::lock_guard<std::mutex> lock(tailbusy);
   ix = tail;
   while (isEmpty()) {
     usleep(10000);
-      if(isDone()) {rc = 1; break; }
-    if(g_abort) {rc = 2; break; }
+    if(isDone()) return 1;
+    if(g_abort) return 2;
   }
-  if(!rc) {
-    mx_buffer[ix].lock();
-    tail = ++tail % size;  // we need the next
-  }
-  return rc;
+  mx_buffer[ix].lock();
+  tail = ++tail % size;  // we need the next
+  return 0;
 }
 
-// updater thread, picks processed buffers and saves results
-// in staging database
+// updater thread, picks processed buffers and update staging database
 void updater(int thread, SharedData& sd, Parameters& parameters) {
+  armTrap();
   pthread_setname_np(pthread_self(),"qdda-updater");
   size_t i=0;
   sd.p_sdb->begin();
@@ -204,7 +195,7 @@ void updater(int thread, SharedData& sd, Parameters& parameters) {
     if(g_abort) break;
     int rc = sd.rb.getused(i);
     if(rc) break;
-    if(g_abort) return;
+    //if(g_abort) break;
     if(!parameters.dryrun)
       for(int j=0; j<sd.v_databuffer[i].used; j++)
         sd.p_sdb->insertdata(sd.v_databuffer[i].v_hash[j],sd.v_databuffer[i].v_bytes[j]);
@@ -263,12 +254,14 @@ ulong readstream(int thread, SharedData& shared, FileData& fd) {
 // reader thread, pick a file if available
 // each reader handles 1 file at a time
 void reader(int thread, SharedData& sd, v_FileData& filelist) {
+  armTrap();
   string self = "qdda-reader-" + toString(thread,0);
   pthread_setname_np(pthread_self(), self.c_str());
   for(int i=0; i<filelist.size(); i++) {
     if(sd.filelocks[i].trylock()) continue; // in use
     if(filelist[i].ifs->is_open()) {
       ulong bytes = readstream(thread, sd, filelist[i]);
+      std::lock_guard<std::mutex> lock(sd.mx_database);
       sd.p_sdb->insertmeta(filelist[i].filename, bytes/sd.blocksize/1024, bytes);
     }
     sd.filelocks[i].unlock();
@@ -278,6 +271,7 @@ void reader(int thread, SharedData& sd, v_FileData& filelist) {
 // worker thread, picks filled buffers and runs hash/compression
 // then updates the database and stats counters
 void worker(int thread, SharedData& sd, Parameters& parameters) {
+  armTrap();
   string self = "qdda-worker-" + toString(thread,0);
   pthread_setname_np(pthread_self(), self.c_str());
   const ulong blocksize = sd.blocksize;
@@ -315,7 +309,6 @@ void worker(int thread, SharedData& sd, Parameters& parameters) {
 
 // Setup staging DB, worker and reader threads to start data analyzer
 void analyze(v_FileData& filelist, QddaDB& db, Parameters& parameters) {
-  armTrap(); // handle ctrl-c
   if(g_debug) cout << "Main thread pid " << getpid() << endl;
 
   Database::deletedb(parameters.stagingname);
@@ -344,6 +337,8 @@ void analyze(v_FileData& filelist, QddaDB& db, Parameters& parameters) {
   updater_thread = thread(updater,0, std::ref(sd), std::ref(parameters));
   for(int i=0; i<workers; i++) worker_thread[i] = thread(worker, i, std::ref(sd), std::ref(parameters));
   for(int i=0; i<readers; i++) reader_thread[i] = thread(reader, i, std::ref(sd), std::ref(filelist));
+
+  signal(SIGINT, SIG_IGN); // ignore ctrl-c
 
   for(int i=0; i<readers; i++) reader_thread[i].join(); 
   sd.rb.done = true; // signal workers that reading is complete

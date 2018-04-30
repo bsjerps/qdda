@@ -44,6 +44,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <stdlib.h>     /* srand, rand */
+#include <signal.h>
 
 #include "lz4/lz4.h"
 #include "tools.h"
@@ -55,7 +56,6 @@ extern "C" {
 }
 
 using namespace std;
-
 
 /*******************************************************************************
  * global parameters - modify at own discretion
@@ -78,7 +78,8 @@ const int kmax_reader_threads = 32;
 bool g_debug = false; // global debug flag
 bool g_query = false; // global query flag
 bool g_quiet = false; // global quiet flag
-bool g_abort = false; // global signal flag - true if ctrl-c was pressed (sigterm)
+extern sig_atomic_t g_abort; // global abort flag
+
 ulong starttime = epoch(); // start time of program
 
 ofstream c_debug; // Debug stream
