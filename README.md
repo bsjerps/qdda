@@ -30,26 +30,24 @@ Wiki page: http://outrun.nl/wiki/qdda
 Installation: qdda is built and packaged for EL6 (CentOS, RHEL etc). See wiki page for download
 instructions.
 
+## Download
+
+[latest version](https://github.com/outrunnl/qdda/releases/latest)
+
 ## Installation
 
-Enterprise Linux systems (RHEL-based):
+From ZIP file:
+- Download the zipfile and place the binary qdda in $PATH
 
-- Install the Outrun Extras repository: `yum install http://yum.outrun.nl/outrun-extras.rpm`
-- Install qdda from repo: `yum install qdda`
-- Binary only: download the zip file from the downloads directory
-
-Non-EL based:
-- Download the ZIP file from the downloads directory.
-
-Building from source
-
-Build prerequisites: stdc++, make, pthreads
+From YUM repository (RPM/YUM based):
 ```
-wget https://github.com/outrunnl/qdda/archive/master.zip
-unzip master.zip 
-cd qdda-master/
-make install
+yum install http://yum.outrun.nl/outrun-extras.rpm
+yum install qdda
 ```
+
+From SOURCE:
+
+See [INSTALL](INSTALL.md)
 
 ## Usage
 
@@ -58,7 +56,9 @@ Further documentation on the wiki page: http://outrun.nl/wiki/qdda
 
 ## Man page
 
-[MAN PAGE](doc/qdda.md)
+See [MAN PAGE](doc/qdda.md)
+you can run the embedded man page using `qdda -m` if your system supports it.
+If qdda is installed from RPM or `make install` you can also do `man qdda`
 
 ## Example
 
