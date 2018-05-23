@@ -78,8 +78,7 @@ const string formatName(string s) {
 // Print stats report
 void report(QddaDB& db) {
   if(g_quiet) return;
-  //ulong blocksize        = db.blocksize;
-  ulong blocksize = 16;
+  ulong blocksize        = db.blocksize;
   string arrayid         = db.arrayid.str();
   const float blocks2mb  = blocksize/1024.0;
   const float bytes2mb   = 1.0/1048576;
