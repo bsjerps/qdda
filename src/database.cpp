@@ -18,12 +18,12 @@
 #include <unistd.h>
 
 #include <errno.h>
-#include <err.h>
 #include <sys/stat.h>
 #include <vector>
 #include <list>
 #include "sqlite/sqlite3.h"
 
+#include "error.h"
 #include "tools.h"
 #include "database.h"
 #include "qdda.h"
@@ -32,11 +32,9 @@ extern bool g_debug;
 extern bool g_query;
 extern bool g_abort;
 extern const char* PROGVERSION;
-extern ulong       starttime;
+extern ulong starttime;
 
-// dirty hack to improve readability
-//#define string std::string
-using namespace std;
+using std::string;
 
 /*******************************************************************************
 * SQLite Schema definition:
@@ -54,6 +52,7 @@ using namespace std;
  * Generic functions
  ******************************************************************************/
 
+
 // test if specified file is SQLite3 file
 int fileIsSqlite3(const char * fn) {
   const char * magic = "SQLite format 3";
@@ -69,35 +68,10 @@ int fileIsSqlite3(const char * fn) {
   return 0;
 }
 
-// delete file only if it exists and is an SQLite 3 database
-int fileDeleteSqlite3(const char * fn) {
-  if(!fileExists(fn))  return 1;
-  if(!fileIsSqlite3(fn)) return 1;
-  if(g_debug) std::cerr << "Deleting file " << fn << std::endl;
-  if (unlink(fn)) err(1, "%s", fn);
-  return 0;
-}
-
 // wrapper for calls with string instead of char*
 int fileExists(const string& fn)        { return fileExists(fn.c_str());}
 int fileIsSqlite3(const string& fn)     { return fileIsSqlite3(fn.c_str());}
 int fileDeleteSqlite3(const string& fn) { return fileDeleteSqlite3(fn.c_str()); }
-
-/*
-string parseFileName(const string& in) {
-  string fn;
-  char cwd[80];
-  if(!getcwd(cwd, 80)) die("Get CWD failed");
-  if((signed char)in.c_str()[0] != '/') { fn = cwd ; fn += '/' ;} // prepend cwd if fn is relative
-  fn+=in;                                                         // append input filename
-  if (!fn.compare(0,4,"/dev")  )            { die("/dev not allowed in filename: " + fn);}
-  if (!fn.compare(0,5,"/proc") )            { die("/proc not allowed in filename: " + fn);}
-  if (!fn.compare(0,4,"/sys")  )            { die("/sys not allowed in filename: " + fn);}
-  if (!fn.find_last_of("/\\"))              { die("root filesystem not allowed: " + fn);}
-  if (fn[fn.length()-1] == '/')             { die("Is directory: " + fn);}
-  if(fileExists(fn) && !fileIsSqlite3(fn))  { die("Not a SQlite3 file: " + fn);}
-  return fn;
-}*/
 
 /*******************************************************************************
  * Query class functions
@@ -105,20 +79,20 @@ string parseFileName(const string& in) {
 
 Query::Query(sqlite3* db, const char* query) {
   ref = 0; // reset parameter count
-  if(!db) die("sqlite3 not initialized");
+  if(!db) throw ERROR("sqlite3 not initialized ") << query;
   const char * pzTest;
   int rc=sqlite3_prepare_v2(db, query, strlen(query), &pStmt, &pzTest);
   if(rc==SQLITE_OK) return;
-  std::cerr << "MySQL prepare, query: " << query;
-  die(sqlite3_errmsg(db));
+  throw ERROR("Peparing MySQL query:") << query << ", " << sqlite3_errmsg(db);
 }
 
 void Query::printerr(const string& str) { 
   std::cerr << str << std::endl;
 }
 
+const char* Query::sqlerror() { return sqlite3_errmsg(sqlite3_db_handle(pStmt)); }
+
 Query::~Query() { 
-  // std::cerr << "closing: " << sql() << "\n" << std::flush;
   sqlite3_finalize(pStmt);
 }
 const char* Query::sql()      { return sqlite3_sql(pStmt); }
@@ -126,41 +100,35 @@ Query::operator const ulong() { return execl(); }
 
 int Query::bind(const ulong p) { 
   int rc = sqlite3_bind_int64(pStmt, ++ref, p);
-  if(rc==SQLITE_OK) return 0;
-  std::cerr << "MySQL bind ulong, return code: " << rc << ", query = " << sql() << "\n";
-  die(sqlite3_errmsg(sqlite3_db_handle(pStmt)));
-  return rc; // we never get here
+  if(rc!=SQLITE_OK) throw ERROR("MySQL bind variable ulong failed, query: ") << sql() << ", " << sqlerror();
+  return 0;
 };
 
 int Query::bind(const char* p) {
-  if(!p) die ("bind string NULL pointer");
+  if(!p) throw ERROR("SQLite parameter is NULL pointer");
   int rc = sqlite3_bind_text (pStmt, ++ref, p, strlen(p),SQLITE_STATIC);
-  if(rc==SQLITE_OK) return 0;
-  std::cerr << "MySQL bind string, return code: " << rc << "\n";
-  die(sqlite3_errmsg(sqlite3_db_handle(pStmt)));
-  return rc; // we never get here
+  if(rc!=SQLITE_OK) throw ERROR("MySQL bind string failed, query: ") << sql() << ", " << sqlerror();
+  return 0;
 };
 
 int Query::bind(const string& p) { return bind(p.c_str()); };
 
 int Query::step() {
-  if(!pStmt) die("Query statement not prepared");
+  if(!pStmt) throw ERROR("Query statement not prepared");
   if(g_query) print(std::cout);
   int rc = sqlite3_step(pStmt);
   if(rc==SQLITE_DONE) return 0;
   if(rc==SQLITE_ROW) return 0;
-  std::cerr << "MySQL step, return code: " << rc << "\n";
-  die(sqlite3_errmsg(sqlite3_db_handle(pStmt)));
-  return rc; // we never get here
+  throw ERROR("executing SQL statement ") << sql() << ", " << sqlerror();
+  return 0; // we never get here
 }
 
 int Query::reset() {
   if(g_query) std::cout << "\n" << std::flush;
   ref=0;
   int rc = sqlite3_reset(pStmt);
-  if(rc==SQLITE_OK) return 0;
-  std::cerr << "MySQL reset, return code: " << rc << "\n";
-  die(sqlite3_errmsg(sqlite3_db_handle(pStmt)));
+  if(rc!=SQLITE_OK) throw ERROR("MySQL reset failed, ") << sqlerror();
+  return 0;
 }
 
 //char *sqlite3_expanded_sql(sqlite3_stmt *pStmt);
@@ -252,12 +220,8 @@ void Query::print(std::ostream& os) {
 
 // Open existing DB
 Database::Database(const string& fn) {
-  std::stringstream errmsg;
   int rc = sqlite3_open_v2(fn.c_str(), &db, SQLITE_OPEN_READWRITE, NULL);
-  if(rc) { 
-    errmsg << "Can't open database, filename: " << fn << ": " << (char *)sqlite3_errmsg(db);
-    die(errmsg.str());
-  }
+  if(rc) throw ERROR("Can't open database, ") << sqlite3_errmsg(db);
   sql("select count(*) from sqlite_master");
   if(g_debug) std::cerr << "DB opened: " << fn << std::endl;  
   pq_begin = new Query(db,"begin transaction");
@@ -267,31 +231,28 @@ Database::Database(const string& fn) {
 int Database::createdb(const string& fn, const char* schema) {
   sqlite3* newdb; 
   char*    errmsg;
-  // string newname = parseFileName(fn);
   std::ifstream f(fn);
-  if(!f.fail()) die("File exists: " + fn);
+
+  if(access(fn.c_str(), F_OK | R_OK)==0) throw ERROR("File already exists: ") << fn ;
+
   int rc = sqlite3_open_v2(fn.c_str(), &newdb, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE, NULL);
-  if( rc != SQLITE_OK ) {
-    std::stringstream errmsg;
-    errmsg << "Can't create database, filename: " << fn << ": " << (char *)sqlite3_errmsg(newdb);
-    die(errmsg.str());
-  }
+  if( rc != SQLITE_OK ) throw ERROR("Can't create database, ") << (char *)sqlite3_errmsg(newdb);
   // running vacuum on a new database ensures the database has the SQLite magic string instead of zero size
   rc = sqlite3_exec(newdb, "vacuum", 0, 0, &errmsg);
-  if( rc != SQLITE_OK ) {
-    std::cerr << "SQL error preparing new database " << fn << std::endl;
-    die("Create database");
-  }
+  if( rc != SQLITE_OK ) throw ERROR("Initializing database ") << fn << ", " << sqlite3_errmsg(newdb);
+
   rc = sqlite3_exec(newdb, schema, 0, 0, &errmsg);
-  if( rc != SQLITE_OK ) {
-    std::cerr << "SQL error creating schema on " << fn << std::endl;
-    die("Create schema");
-  }
+  if( rc != SQLITE_OK ) throw ERROR("Creating schema failed on ") << fn << ", " << sqlite3_errmsg(newdb);
   return 0;
 }
 
 // detach tempdb and finalize all statements before closing db
-Database::~Database()   { delete pq_begin; delete pq_end; close(); }
+Database::~Database()   {
+  delete pq_begin;
+  delete pq_end;
+  close();
+}
+
 void Database::begin()  { pq_begin->exec(); }
 void Database::end()    { pq_end->exec(); }
 
@@ -365,8 +326,7 @@ void Database::sql(const string& query) {
   char * errmsg;
   rc = sqlite3_exec(db, query.c_str(), 0, 0, &errmsg);
   if( rc != SQLITE_OK ) {
-    std::cerr << "SQL error: " << errmsg << ", SQL: " << query << std::endl;
-    die("Cannot execute SQL");
+    throw ERROR("Cannot execute SQL, ") << query << ", " << sqlite3_errmsg(db);
   }
 }
 
@@ -581,7 +541,7 @@ select size, buckets, perc, blocks, blocks*blksz/1024.0 MiB from temp;
  ******************************************************************************/
 
 void QddaDB::setmetadata(int blocksz, const string& compr, const string& name, const string& buckets) {
-  if(blocksz>128) die("Blocksize too large");
+  if(blocksz>128) throw ERROR("Blocksize too large: ") << blocksz;
   Query q_meta(db,"insert into metadata (version, blksz, compression, arrayid, created) values (?,?,?,?,?)");
   q_meta.bind(PROGVERSION);  
   q_meta.bind(blocksz);

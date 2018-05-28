@@ -12,18 +12,12 @@
 #include <string>
 #include <limits.h>
 
-// dirty hack to improve readability
-#define string std::string
-
 /*******************************************************************************
  * functions
  ******************************************************************************/
 
 int fileIsSqlite3(const char * fn);          // test if file is SQLite3 format
-int fileIsSqlite3(const string& s);     // test if file is SQLite3 format
-
-int fileDeleteSqlite3(const string& s); // same for string type
-int fileDeleteSqlite3(const char * fn);      // delete only if file is SQLite3
+int fileIsSqlite3(const std::string& s);     // test if file is SQLite3 format
 
 /*******************************************************************************
  * forward decs
@@ -42,19 +36,20 @@ class Query {
 public:
   Query(sqlite3* db,const char *);  // create and prepare a query
   ~Query();                         // call finalize
-  void  printerr(const string&);
+  void  printerr(const std::string&);
   void  print(std::ostream& os);    // print the expanded sql after running step()
   const char *sql();                // return the query text
   int   bind(const ulong);          // bind next parameter
   int   bind(const char*);          // same for char*
-  int   bind(const string&);        // same for string
+  int   bind(const std::string&);   // same for string
   void  exec();                     // execute query, ignore results
   ulong execl();                    // execute query, return ulong
   ulong execl(ulong p);             // same but bind parameter first
   ulong execl(ulong p,ulong q);     // 2 parameters
-  const string str();               // return string result
+  const std::string str();          // return string result
+  const char * sqlerror();          // show error message
   operator const ulong();           // default type conversion is unsigned long
-  void  report(std::ostream& os, const string& tabs); // run a query as report
+  void  report(std::ostream& os, const std::string& tabs); // run a query as report
 private:
   Query(const Query&);              // disable copy i.e. auto = (Query)
   int step();                       // execute query
@@ -66,17 +61,17 @@ private:
 // Class to hold the structure of the SQLite database and various statements
 class Database {
 public:
-  explicit Database(const string& fn);
+  explicit Database(const std::string& fn);
   ~Database();
   const char*  filename();
   ulong        filesize();
   int          unlinkdb();
-  static int   createdb(const string& fn, const char* schema);
-  static int   deletedb(const string& fn);
-  static int   exists(const string& fn);
-  void         settmpdir (const string& d) { tmpdir = d; };
-  int          attach(const string& s, const string& p);
-  int          detach(const string& s);
+  static int   createdb(const std::string& fn, const char* schema);
+  static int   deletedb(const std::string& fn);
+  static int   exists(const std::string& fn);
+  void         settmpdir (const std::string& d) { tmpdir = d; };
+  int          attach(const std::string& s, const std::string& p);
+  int          detach(const std::string& s);
   int          close();
   // various
   void         begin();
@@ -85,22 +80,22 @@ public:
 protected:
   Query* pq_begin;
   Query* pq_end;
-  void         sql(const string& query);
-  sqlite3* db;           // global sqlite database
-  string   tmpdir;       // SQLITE_TMPDIR
+  void         sql(const std::string& query);
+  sqlite3*     db;           // global sqlite database
+  std::string  tmpdir;       // SQLITE_TMPDIR
 private:
   Database(const Database&) = delete;
 };
 
 class StagingDB: public Database {
 public:
-  explicit StagingDB(const string& fn);
+  explicit StagingDB(const std::string& fn);
  ~StagingDB(); 
-  static void createdb(const string& fn, ulong blocksize);
+  static void createdb(const std::string& fn, ulong blocksize);
   int         fillrandom(ulong rows, int blocksize, int dup);
   int         fillzero(ulong rows);
   void        insertdata(ulong, ulong);
-  int         insertmeta(const string& name, ulong blocks, ulong bytes);
+  int         insertmeta(const std::string& name, ulong blocks, ulong bytes);
   Query blocksize;
   Query rows;
   Query setblocksize;
@@ -113,15 +108,15 @@ public:
 
 class QddaDB: public Database {
 public:
-  explicit QddaDB(const string& fn);
-  static void  createdb(const string& fn);
-  void         loadbuckets(const string&);
-  void         import(const string&);
-  void         merge(const string&);
+  explicit QddaDB(const std::string& fn);
+  static void  createdb(const std::string& fn);
+  void         loadbuckets(const std::string&);
+  void         import(const std::string&);
+  void         merge(const std::string&);
   int          insbucket(const char *,ulong, ulong);
   void         set_comp_method();
-  void         setmetadata(int blocksize, const string& compr, const string& name, const string& buckets);
-  void         parsemetadata(string);
+  void         setmetadata(int blocksize, const std::string& compr, const std::string& name, const std::string& buckets);
+  void         parsemetadata(std::string);
   void         update();
   ulong        gettmpblocksize();
   ulong        gettmprows();

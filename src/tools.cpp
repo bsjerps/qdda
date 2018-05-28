@@ -25,17 +25,13 @@
 #include <getopt.h>
 #include <signal.h>
 
+#include "error.h"
 #include "tools.h"
 
-#define string std::string
+using std::string;
 
 sig_atomic_t g_abort;
-
-// Die with error message
-void die(string errmsg,int rc) { 
-  std::cerr << "Error: " << errmsg << " " << std::endl << std::flush;
-  exit(rc);
-}
+extern bool g_debug;
 
 // show line and filename (using #define debug macro)
 void debugMsg(const char* file, int line) {
@@ -116,7 +112,7 @@ const char* hostName() {
 const char* whoAmI() {
   static char buf[1024];
   memset(buf, 0, sizeof(buf));
-  if(!readlink("/proc/self/exe",buf,1024)) die ("Cannot determine path");
+  if(!readlink("/proc/self/exe",buf,1024)) throw ERROR("Cannot determine path to executable");
   return buf;
 }
 
@@ -161,7 +157,7 @@ StringArray& StringArray::operator+=(const ulong var) {
 // Return element i in string
 const string& StringArray::operator[](int i) {
   if(i>=v_string.size()) 
-    die ("Index out of range for StringArray");
+    throw ERROR("Index out of range");
   return v_string[i];
 }
 
@@ -258,9 +254,9 @@ int LongOptions::parse(int argc, char** argv) {
   }
   while ((c = getopt_long(argc, argv, optstr.c_str(), long_opts(), NULL)) != -1) {
     for(int i=0;i<opts.size();i++) {
-      if(c=='?') return 1;
+      if(c=='?') throw ERROR("Invalid parameter");
       if(c==opts[i].val) {
-        if(opts[i].func)    { opts[i].func(); exit(0); }
+        if(opts[i].func)    { opts[i].func(); return 1; }
         if(opts[i].p_bool)  { *opts[i].p_bool = true; }
         if(!hasarg(i)) continue;
         if(opts[i].p_ulong) { *opts[i].p_ulong = atol(optarg); }

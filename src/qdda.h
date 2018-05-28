@@ -12,9 +12,6 @@
 #include <vector>
 #include "database.h"
 
-// dirty hack to improve readability
-#define string std::string
-
 class FileData;
 
 typedef std::vector<FileData> v_FileData;
@@ -43,9 +40,9 @@ void  progress(ulong blocks,ulong blocksize, ulong bytes, const char * msg = NUL
 
 class FileData {
 public:
-  explicit FileData(const string& name);
+  explicit FileData(const std::string& name);
   std::ifstream* ifs;
-  string         filename;
+  std::string    filename;
   ulong          limit_mb;
   int            repeat;
   int            ratio;
@@ -54,11 +51,11 @@ private:
 
 // Parameter set to pass between functions
 struct Parameters {
-  string dbname;
-  string stagingname;
-  string tmpdir;
-  string array;
-  string import;
+  std::string dbname;
+  std::string stagingname;
+  std::string tmpdir;
+  std::string array;
+  std::string import;
   ulong searchhash;
   int  bandwidth; // default bandwidth throttle (MB/s)
   int  workers;   // number of workers (threads)
@@ -69,6 +66,7 @@ struct Parameters {
   bool do_cputest;
   bool do_purge;
   bool do_delete;
+  bool do_demo;
   bool queries;
   bool skip;
   bool list;

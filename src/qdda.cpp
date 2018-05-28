@@ -29,6 +29,10 @@
  * 2.0.0 - Multithreading and rewrite
  * 2.0.1 - Bugfix max filesize
  * 2.0.2 - Dynamic version strings
+ * 2.0.3 - ?
+ * 2.0.4 - Many improvements & fixes
+ * 2.0.5 - Report blocksize fix
+ * 2.0.6 - Exception handling
  * ---------------------------------------------------------------------------
  * Build notes: Requires lz4 >= 1.7.1
  ******************************************************************************/
@@ -43,9 +47,11 @@
 
 #include <unistd.h>
 #include <pthread.h>
-#include <stdlib.h>     /* srand, rand */
+#include <stdlib.h>    // srand, rand
 #include <signal.h>
+#include <sys/stat.h>  // stat
 
+#include "error.h"
 #include "lz4/lz4.h"
 #include "tools.h"
 #include "database.h"
@@ -101,16 +107,23 @@ FileData::FileData(const string& file) {
   if(!strlimit.empty()) limit_mb = atoll(strlimit.c_str());
   repeat   = atoi(strrepeat.c_str());
 
+  if(access(filename.c_str(), F_OK | R_OK)) {
+    switch (errno) {
+      case EACCES: throw ERROR("Access denied: ") << file << ", try 'sudo setfacl -m u:" << getenv ("USER") << ":r " << filename << "'";
+      case ENOENT: throw ERROR("File does not exist: ") << file;
+    }
+    throw ERROR("File error: ") << file;
+  }
+
   ifs = new ifstream;
+  ifs->exceptions ( std::ifstream::failbit );
+
   c_debug << "Opening: " << file << endl;
-  ifs->open(filename);
-  if (!ifs->is_open()) {
-    string msg = "File open failed, try:\nsudo setfacl -m u:";
-    msg += getenv ("USER");
-    msg += ":r ";
-    msg += filename;
-    msg += "\n";
-    die(msg);
+  try {
+    ifs->open(filename);
+  }
+  catch (std::exception& e) {
+    throw ERROR("File open error in ") << file;
   }
 }
 
@@ -133,7 +146,7 @@ extern const char* manpage_head;
 extern const char* manpage_body;
 
 void showtitle()   { if(!g_quiet) cout << "qdda " << PROGVERSION << title_info ; }
-void showversion() { showtitle(); std::cout << version_info << std::endl; exit(0); }
+void showversion() { showtitle(); std::cout << version_info << std::endl; }
 
 /*******************************************************************************
  * Various
@@ -241,7 +254,7 @@ void import(QddaDB& db, const string& filename) {
   if(!fileIsSqlite3(filename)) return;
   QddaDB idb(filename);
   ulong blocksize = db.blocksize;
-  if(blocksize != idb.blocksize) die ("Incompatible blocksize");
+  if(blocksize != idb.blocksize) throw ERROR("Incompatible blocksize on") << filename;
 
   cout << "Adding " << idb.rows << " blocks from " << filename << " to " << db.rows << " existing blocks" << endl;
   db.import(filename);
@@ -262,7 +275,7 @@ void merge(QddaDB& db, Parameters& parameters) {
   ulong fsize1       = db.filesize();
   ulong fsize2       = sdb.filesize();
 
-  if(blocksize != sdb.blocksize) die ("Incompatible blocksize");
+  if(blocksize != sdb.blocksize) throw ERROR("Incompatible blocksize on stagingdb");
   
   sdb.close();
 
@@ -397,6 +410,13 @@ void mandump(LongOptions& lo) {
   cout << manpage_body;
 }
 
+void rundemo() {
+  string cmd = "";
+  cmd += whoAmI();
+  cmd += " -d /tmp/demo compress:128,4 compress:256,2 compress:512 zero:512";
+  if(!system(cmd.c_str())) { };
+}
+
 void findhash(Parameters& parameters) {
   StagingDB db(parameters.stagingname);
   db.findhash.bind(parameters.searchhash);
@@ -411,7 +431,7 @@ void tophash(QddaDB& db, int amount = 10) {
 // safety guards against overwriting existing files or devices by SQLite
 void ParseFileName(string& name) {
   char buf[160];
-  if(!getcwd(buf, 160)) die("Get CWD failed");
+  if(!getcwd(buf, 160)) throw ERROR("Get current directory failed");
   string cwd = buf;
   if(name.empty()) name = homeDir() + "/qdda.db";
   if(name[0] != '/') name = cwd + "/" + name;
@@ -419,10 +439,10 @@ void ParseFileName(string& name) {
     auto i=name.find("//");
     name.replace(i,2,"/");
   }
-  if (!name.compare(0,4,"/dev")  )            { die("/dev not allowed in filename: " + name);}
-  if (!name.compare(0,5,"/proc") )            { die("/proc not allowed in filename: " + name);}
-  if (!name.compare(0,4,"/sys")  )            { die("/sys not allowed in filename: " + name);}
-  if (!name.find_last_of("/\\"))              { die("root dir not allowed: " + name);}
+  if (!name.compare(0,4,"/dev")  )   throw ERROR("/dev not allowed in filename: " ) << name;
+  if (!name.compare(0,5,"/proc") )   throw ERROR("/proc not allowed in filename: ") << name;
+  if (!name.compare(0,4,"/sys")  )   throw ERROR("/sys not allowed in filename: " ) << name;
+  if (!name.find_last_of("/\\"))     throw ERROR("root dir not allowed: "         ) << name;
   if(name.find(".db")>name.length()) name += ".db";
 }
 
@@ -433,105 +453,115 @@ string genStagingName(string& name) {
   return tmpname;
 }
 
+void errorTest() {
+  throw ERROR("Error test ") << "Extra info: user=" << getenv("USER"); // << std::endl;
+}
+
 /*******************************************************************************
  * Main section - process options etc
  ******************************************************************************/
 
 int main(int argc, char** argv) {
-  int rc = 0;
-  
   Parameters parameters = {};
-  Parameters& p = parameters; // shorthand  
-
-  v_FileData  filelist;
 
   // set default values
-  p.workers   = cpuCount();
-  p.readers   = kmax_reader_threads;
-  p.bandwidth = kdefault_bandwidth;
-  p.array     = kdefault_array;
-  
-  LongOptions opts;
-  opts.add("version"  ,'V', ""            , showversion,  "show version and copyright info");
-  opts.add("help"     ,'h', ""            , p.do_help,    "show usage");
-  opts.add("man"      ,'m', ""            , manpage,      "show detailed manpage");
-  opts.add("db"       ,'d', "<file>"      , p.dbname,     "database file path (default $HOME/qdda.db)");
-  opts.add("append"   ,'a', ""            , p.append,     "Append data instead of deleting database");
-  opts.add("delete"   , 0 , ""            , p.do_delete,  "Delete database");
-  opts.add("quiet"    ,'q', ""            , g_quiet,      "Don't show progress indicator or intermediate results");
-  opts.add("bandwidth",'b', "<mb/s>"      , p.bandwidth,  "Throttle bandwidth in MB/s (default 200, 0=disable)");
-  opts.add("array"    , 0 , "<id|def>"    , p.array,      "set array type or custom definition <x1|x2|vmax1|definition>");
-  opts.add("list"     ,'l', ""            , showlist,     "list supported array types and custom definition options");
-  opts.add("detail"   ,'x', ""            , p.detail,     "Detailed report (file info and dedupe/compression histograms)");
-  opts.add("dryrun"   ,'n', ""            , p.dryrun,     "skip staging db updates during scan");
-  opts.add("purge"    , 0 , ""            , p.do_purge,   "Reclaim unused space in database (sqlite vacuum)");
-  opts.add("import"   , 0 , "<file>"      , p.import,     "import another database (must have compatible metadata)");
-  opts.add("cputest"  , 0 , ""            , p.do_cputest, "Single thread CPU performance test");
-  opts.add("nomerge"  , 0 , ""            , p.skip,       "Skip staging data merge and reporting, keep staging database");
-  opts.add("debug"    , 0 , ""            , g_debug,      "Enable debug output");
-  opts.add("queries"  , 0 , ""            , g_query,      "Show SQLite queries and results"); // --show?
-  opts.add("tmpdir"   , 0 , "<dir>"       , p.tmpdir,     "Set $SQLITE_TMPDIR for temporary files");
-  opts.add("workers"  , 0 , "<wthreads>"  , p.workers,    "number of worker threads");
-  opts.add("readers"  , 0 , "<rthreads>"  , p.readers,    "(max) number of reader threads");
-  opts.add("findhash" , 0 , "<hash>"      , p.searchhash, "find blocks with hash=<hash> in staging db");
-  opts.add("tophash"  , 0 , "<num>"       , p.tophash,    "show top <num> hashes by refcount");
-  opts.add("mandump"  , 0 , ""            , p.do_mandump, "dump raw manpage to stdout");
+  parameters.workers   = cpuCount();
+  parameters.readers   = kmax_reader_threads;
+  parameters.bandwidth = kdefault_bandwidth;
+  parameters.array     = kdefault_array;
+
+  Parameters& p = parameters; // shorthand alias
+  try {
+    LongOptions opts;
+    opts.add("version"  ,'V', ""            , showversion,  "show version and copyright info");
+    opts.add("help"     ,'h', ""            , p.do_help,    "show usage");
+    opts.add("man"      ,'m', ""            , manpage,      "show detailed manpage");
+    opts.add("db"       ,'d', "<file>"      , p.dbname,     "database file path (default $HOME/qdda.db)");
+    opts.add("append"   ,'a', ""            , p.append,     "Append data instead of deleting database");
+    opts.add("delete"   , 0 , ""            , p.do_delete,  "Delete database");
+    opts.add("quiet"    ,'q', ""            , g_quiet,      "Don't show progress indicator or intermediate results");
+    opts.add("bandwidth",'b', "<mb/s>"      , p.bandwidth,  "Throttle bandwidth in MB/s (default 200, 0=disable)");
+    opts.add("array"    , 0 , "<id|def>"    , p.array,      "set array type or custom definition <x1|x2|vmax1|definition>");
+    opts.add("list"     ,'l', ""            , showlist,     "list supported array types and custom definition options");
+    opts.add("detail"   ,'x', ""            , p.detail,     "Detailed report (file info and dedupe/compression histograms)");
+    opts.add("dryrun"   ,'n', ""            , p.dryrun,     "skip staging db updates during scan");
+    opts.add("purge"    , 0 , ""            , p.do_purge,   "Reclaim unused space in database (sqlite vacuum)");
+    opts.add("import"   , 0 , "<file>"      , p.import,     "import another database (must have compatible metadata)");
+    opts.add("cputest"  , 0 , ""            , p.do_cputest, "Single thread CPU performance test");
+    opts.add("nomerge"  , 0 , ""            , p.skip,       "Skip staging data merge and reporting, keep staging database");
+    opts.add("debug"    , 0 , ""            , g_debug,      "Enable debug output");
+    opts.add("queries"  , 0 , ""            , g_query,      "Show SQLite queries and results"); // --show?
+    opts.add("tmpdir"   , 0 , "<dir>"       , p.tmpdir,     "Set $SQLITE_TMPDIR for temporary files");
+    opts.add("workers"  , 0 , "<wthreads>"  , p.workers,    "number of worker threads");
+    opts.add("readers"  , 0 , "<rthreads>"  , p.readers,    "(max) number of reader threads");
+    opts.add("findhash" , 0 , "<hash>"      , p.searchhash, "find blocks with hash=<hash> in staging db");
+    opts.add("tophash"  , 0 , "<num>"       , p.tophash,    "show top <num> hashes by refcount");
+    opts.add("mandump"  , 0 , ""            , p.do_mandump, "dump raw manpage to stdout");
+    opts.add("demo"     , 0 , ""            , rundemo,      "show quick demo");
 #ifdef __DEBUG
-  opts.add("buffers"  , 0 , "<buffers>"   , p.buffers,    "number of buffers (debug only!)");
+    opts.add("buffers"  , 0 , "<buffers>"   , p.buffers,    "number of buffers (debug only!)");
+    opts.add("extest"   , 0 , ""            , errorTest,    "Test error handling");
 #endif
-
-  rc=opts.parse(argc,argv);
-  if(rc) die ("Invalid option");
-
-  if(p.do_help)         { showhelp(opts); exit(0); }
-  else if(p.do_mandump) { mandump(opts); exit(0); }
   
-  if(!p.tmpdir.empty()) setenv("SQLITE_TMPDIR",p.tmpdir.c_str(),1);
-
-  showtitle();
-  ParseFileName(p.dbname);
-  p.stagingname = genStagingName(p.dbname);
+    int rc=opts.parse(argc,argv);
+    if(rc) return 0; // opts.parse executed a message function
   
-  if(p.do_delete)  {
-    if(!g_quiet) cout << "Deleting database " << p.dbname << endl;
-    Database::deletedb(p.dbname); exit(0);
+    if(p.do_help)         { showhelp(opts); return 0; }
+    else if(p.do_mandump) { mandump(opts); return 0; }
+    
+    if(!p.tmpdir.empty()) setenv("SQLITE_TMPDIR",p.tmpdir.c_str(),1);
+  
+    showtitle();
+    ParseFileName(p.dbname);
+    p.stagingname = genStagingName(p.dbname);
+    
+    if(p.do_delete)  {
+      if(!g_quiet) cout << "Deleting database " << p.dbname << endl;
+      Database::deletedb(p.dbname); return 0;
+    }
   }
-  
-  // Build filelist
-  if(optind<argc || !isatty(fileno(stdin)) ) {
-    if (!isatty(fileno(stdin)))
-      filelist.push_back(FileData("/dev/stdin"));
-    for (int i = optind; i < argc; ++i)
-      filelist.push_back(FileData(argv[i]));
-    if(!parameters.append) { // not appending -> delete old database
+  catch (Fatal& e) { e.print(); return 10; }
+
+  v_FileData filelist;
+
+  try {
+    // Build filelist
+    if(optind<argc || !isatty(fileno(stdin)) ) {
+      if (!isatty(fileno(stdin)))
+        filelist.push_back(FileData("/dev/stdin"));
+      for (int i = optind; i < argc; ++i)
+        filelist.push_back(FileData(argv[i]));
+      if(!parameters.append) { // not appending -> delete old database
+        if(!g_quiet) cout << "Creating new database " << p.dbname << endl;
+        Database::deletedb(p.dbname);
+        QddaDB::createdb(p.dbname);
+      }
+    }
+    if(p.do_cputest && !p.append) {
       if(!g_quiet) cout << "Creating new database " << p.dbname << endl;
       Database::deletedb(p.dbname);
       QddaDB::createdb(p.dbname);
     }
-  }
-  if(p.do_cputest && !p.append) {
-    if(!g_quiet) cout << "Creating new database " << p.dbname << endl;
-    Database::deletedb(p.dbname);
-    QddaDB::createdb(p.dbname);
-  }
-  if(!Database::exists(p.dbname)) QddaDB::createdb(p.dbname);
-  QddaDB db(p.dbname);
-  db.parsemetadata(parameters.array);
+    if(!Database::exists(p.dbname)) QddaDB::createdb(p.dbname);
+    QddaDB db(p.dbname);
+    db.parsemetadata(parameters.array);
+    if(filelist.size()>0) 
+      analyze(filelist, db, parameters);
 
-  if(filelist.size()>0) 
-    analyze(filelist, db, parameters);
+    if(g_abort) return 1;
 
-  if(g_abort) return 1;
-
-  if(p.do_purge)             { db.vacuum();           }
-  else if(!p.import.empty()) { import(db,p.import);   }
-  else if(p.do_cputest)      { cputest(db,p) ;        } 
-  else if(p.searchhash!=0)   { findhash(p);           }
-  else if(p.tophash!=0)      { tophash(db,p.tophash); }
-  else {
-    if(!parameters.skip)     { merge(db,parameters); }
-    if(parameters.detail)    { reportDetail(db); }
-    else if (!p.skip)        { report(db); }
+    if(p.do_purge)             { db.vacuum();           }
+    else if(!p.import.empty()) { import(db,p.import);   }
+    else if(p.do_cputest)      { cputest(db,p) ;        } 
+    else if(p.searchhash!=0)   { findhash(p);           }
+    else if(p.tophash!=0)      { tophash(db,p.tophash); }
+    else {
+      if(!parameters.skip)     { merge(db,parameters); }
+      if(parameters.detail)    { reportDetail(db); }
+      else if (!p.skip)        { report(db); }
+    }
   }
+  catch (Fatal& e) { e.print(); return -1; }
+  return 0;  
 }
 

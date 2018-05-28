@@ -20,9 +20,6 @@
 
 struct option;
 
-// dirty hack to improve readability
-#define string std::string
-
 /*******************************************************************************
  * Debugging and messaging
  ******************************************************************************/
@@ -35,7 +32,7 @@ struct option;
 void dumpvars_exp(const char* names, int, ...);
 void debugMsg(const char*, int); // show line and filename
 
-#define debug              debugMsg(__FILE__,__LINE__);
+#define WHERE              debugMsg(__FILE__,__LINE__);
 #define dumpline           std::cout << __LINE__ << " ";
 // show one or up to three variable names and values
 #define dvar(v)            std::cout << #v << "=" << v << " "
@@ -48,20 +45,19 @@ void debugMsg(const char*, int); // show line and filename
 #define RELEASE ""
 #endif
 
-// Spartan error handling, just quit with error if something goes wrong
-void die(string errMsg, int rc=10);
+
 
 /*******************************************************************************
  * String functions
  ******************************************************************************/
 
-bool isNum(const string& s);    // true if string only has digits
+bool isNum(const std::string& s);    // true if string only has digits
 void toUpper(char *str);        // convert a string to uppercase (inplace)
-void toUpper(string& str);      // same with string instead of char*
-void searchReplace(string& src, string const& find, string const& repl); // global inplace search/replace within string
+void toUpper(std::string& str);      // same with string instead of char*
+void searchReplace(std::string& src, std::string const& find, std::string const& repl); // global inplace search/replace within string
 
 // Print to string with precision N (float, double)
-template <typename T> string toString(const T value, const int n = 2) {
+template <typename T> std::string toString(const T value, const int n = 2) {
   std::ostringstream out;
   out << std::fixed << std::setprecision(n) << value;
   return out.str();
@@ -88,8 +84,8 @@ int   cpuCount();        // return number of cpus (cores)
 ulong epoch();           // secs since 1970
 const char* hostName();  // system hostname
 const char* whoAmI();    // path to self
-const string& homeDir();
-const string  dirName(const string& file);   // return dir portion of filename, including '/'
+const std::string& homeDir();
+const std::string  dirName(const std::string& file);   // return dir portion of filename, including '/'
 int   fileExists(const char * fn);           // return true if file exists
 long  fileSystemFree(const char* filename);  // filesystem free in MB for this file
 off_t fileSize(const char *filename);        // return size of file in bytes
@@ -108,8 +104,8 @@ public:
   Stopwatch()       { reset();}
   void reset()      { t1 = std::chrono::high_resolution_clock::now(); t2=t1;}          // reset timers
   const ulong lap() { t2 = std::chrono::high_resolution_clock::now(); return diff(); } // save laptime and return diff
-  const string seconds() const;        // return seconds in #.## format
-  const string runtime() const;        // return runtime message
+  const std::string seconds() const;        // return seconds in #.## format
+  const std::string runtime() const;        // return runtime message
   operator ulong()  { return diff(); } // returns saved laptime
 };
 
@@ -118,12 +114,12 @@ public:
  ******************************************************************************/
 
 class StringArray {
-  std::vector<string> v_string;
+  std::vector<std::string> v_string;
 public:
   int size()    { return v_string.size(); }
-  StringArray& operator+=(const string& s);
+  StringArray& operator+=(const std::string& s);
   StringArray& operator+=(const ulong);
-  const string& operator[](int i);
+  const std::string& operator[](int i);
   friend std::ostream& operator<< (std::ostream&, StringArray&);
 };
 
@@ -143,16 +139,16 @@ class LongOptions {
     int*         p_int;
     ulong*       p_ulong;
     bool*        p_bool;
-    string* p_str;
+    std::string* p_str;
     void (*func)();
   };
 public:
   LongOptions() { val = 1024; };
   // each add function takes a variable, 
-  void  add(const char* name, char c, const char* p, bool&   v,   const char* desc);
-  void  add(const char* name, char c, const char* p, int&    v,   const char* desc);
-  void  add(const char* name, char c, const char* p, ulong&  v,   const char* desc);
-  void  add(const char* name, char c, const char* p, string& v,   const char* desc);
+  void  add(const char* name, char c, const char* p, bool&        v, const char* desc);
+  void  add(const char* name, char c, const char* p, int&         v, const char* desc);
+  void  add(const char* name, char c, const char* p, ulong&       v, const char* desc);
+  void  add(const char* name, char c, const char* p, std::string& v, const char* desc);
   void  add(const char* name, char c, const char* p, void (*f)(), const char* desc);
   int   hasarg(int i) { return strlen(opts[i].optname)?1:0; }
   void  printhelp(std::ostream& os);
