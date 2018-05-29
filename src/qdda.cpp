@@ -29,10 +29,11 @@
  * 2.0.0 - Multithreading and rewrite
  * 2.0.1 - Bugfix max filesize
  * 2.0.2 - Dynamic version strings
- * 2.0.3 - ?
+ * 2.0.3 - Various updates
  * 2.0.4 - Many improvements & fixes
  * 2.0.5 - Report blocksize fix
  * 2.0.6 - Exception handling
+ * 2.0.7 - Bugfix for EOF while reading
  * ---------------------------------------------------------------------------
  * Build notes: Requires lz4 >= 1.7.1
  ******************************************************************************/
@@ -121,6 +122,7 @@ FileData::FileData(const string& file) {
   c_debug << "Opening: " << file << endl;
   try {
     ifs->open(filename);
+    ifs->exceptions ( std::ifstream::goodbit );
   }
   catch (std::exception& e) {
     throw ERROR("File open error in ") << file;
@@ -561,7 +563,9 @@ int main(int argc, char** argv) {
       else if (!p.skip)        { report(db); }
     }
   }
+  catch (std::bad_alloc& e) { ERROR("Out of memory").print(); return -1; }
   catch (Fatal& e) { e.print(); return -1; }
+
   return 0;  
 }
 
