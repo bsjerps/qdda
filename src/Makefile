@@ -7,7 +7,7 @@
 # ---------------------------------------------------------------------------
 
 prefix     = /usr/local
-branch     = $(shell git symbolic-ref --short HEAD | awk '!/^master/ {print "-"$$0}')
+branch     = $(shell git symbolic-ref HEAD | awk -F/ '!/master/ {print "-"$$NF}')
 mandir     = $(prefix)/share/man
 datadir    = $(prefix)/share
 RPM       := $(shell rpm --version 2>/dev/null)
