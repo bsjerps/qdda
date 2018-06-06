@@ -451,7 +451,8 @@ QddaDB::QddaDB(const string& fn): Database(fn),
   q_loadbuckets         (db,"insert or replace into buckets values (?)"),
   q_truncbuckets        (db,"delete from buckets"),
   filelist              (db,"select * from v_files"),
-  tophash               (db,"select hash,blocks from kv where hash!=0 and blocks>1 order by blocks desc limit ?")
+  tophash               (db,"select hash,blocks from kv where hash!=0 and blocks>1 order by blocks desc limit ?"),
+  squash                (db,"update kv set blocks=1")
 {
   sql("PRAGMA schema_version");      // trigger error if not open
   sql("PRAGMA temp_store_directory = '" + tmpdir + "'");

@@ -138,6 +138,7 @@ public:
   Query compresshistogram;
   Query dedupehistogram;
   Query tophash;
+  Query squash;
 private:
   Query q_loadbuckets;
   Query q_truncbuckets;

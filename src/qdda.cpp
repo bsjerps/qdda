@@ -430,6 +430,11 @@ void tophash(QddaDB& db, int amount = 10) {
   db.tophash.report(cout,"20,10");
 }
 
+void squash(QddaDB& db) {
+  db.squash.exec();
+  db.update();
+}
+
 // safety guards against overwriting existing files or devices by SQLite
 void ParseFileName(string& name) {
   char buf[160];
@@ -498,6 +503,7 @@ int main(int argc, char** argv) {
     opts.add("readers"  , 0 , "<rthreads>"  , p.readers,    "(max) number of reader threads");
     opts.add("findhash" , 0 , "<hash>"      , p.searchhash, "find blocks with hash=<hash> in staging db");
     opts.add("tophash"  , 0 , "<num>"       , p.tophash,    "show top <num> hashes by refcount");
+    opts.add("squash"   , 0 , ""            , p.squash,     "set all refcounts to 1");
     opts.add("mandump"  , 0 , ""            , p.do_mandump, "dump raw manpage to stdout");
     opts.add("demo"     , 0 , ""            , rundemo,      "show quick demo");
 #ifdef __DEBUG
@@ -557,6 +563,7 @@ int main(int argc, char** argv) {
     else if(p.do_cputest)      { cputest(db,p) ;        } 
     else if(p.searchhash!=0)   { findhash(p);           }
     else if(p.tophash!=0)      { tophash(db,p.tophash); }
+    else if(p.squash!=0)       { squash(db); }
     else {
       if(!parameters.skip)     { merge(db,parameters); }
       if(parameters.detail)    { reportDetail(db); }

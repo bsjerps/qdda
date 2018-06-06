@@ -74,6 +74,7 @@ struct Parameters {
   bool append;
   bool quiet;
   bool detail;
+  bool squash;
   int tophash;
 };
 

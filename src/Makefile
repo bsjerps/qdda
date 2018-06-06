@@ -7,10 +7,11 @@
 # ---------------------------------------------------------------------------
 
 prefix     = /usr/local
+branch     = $(shell git symbolic-ref --short HEAD | awk '!/^master/ {print "-"$$0}')
 mandir     = $(prefix)/share/man
 datadir    = $(prefix)/share
 RPM       := $(shell rpm --version 2>/dev/null)
-version    = $(shell awk '/^Version:/ {print $$NF}' ../qdda.spec)
+version    = $(shell awk '/^Version:/ {print $$NF}' ../qdda.spec)$(branch)
 CXXFLAGS  += -std=c++0x -DVERSION=$(version)
 CFLAGS    += -O3
 LIBS       = -lpthread -lstdc++ -ldl
@@ -74,7 +75,7 @@ src:	checkrpm allclean
 
 # Create zipfile for download
 zip:	all
-	zip ../download/qdda-$(version).zip qdda
+	zip qdda-$(version).zip qdda
 
 # Build the RPM from archive made in 'src' section
 rpm:	checkrpm src

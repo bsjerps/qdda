@@ -29,6 +29,7 @@
 *.app
 
 qdda
+qdda*.zip
 
 # Swap files
 *.swp
