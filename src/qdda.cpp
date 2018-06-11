@@ -34,6 +34,7 @@
  * 2.0.5 - Report blocksize fix
  * 2.0.6 - Exception handling
  * 2.0.7 - Bugfix for EOF while reading
+ * 2.0.8 - Reduced max reader threads from 32 to 8
  * ---------------------------------------------------------------------------
  * Build notes: Requires lz4 >= 1.7.1
  ******************************************************************************/
@@ -76,7 +77,7 @@ const char* PROGVERSION = "0.0.1";
 
 const char* kdefault_array = "x2";
 const int kdefault_bandwidth = 200;
-const int kmax_reader_threads = 32;
+const int kmax_reader_threads = 8;
 
 /*******************************************************************************
  * Initialization - globals
