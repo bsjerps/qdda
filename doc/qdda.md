@@ -1,9 +1,8 @@
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
 <HTML><HEAD>
 </HEAD><BODY>
 <H1>qdda</H1>
 Section: QDDA User Manual (1)<BR>Updated: 2018-03-24<BR><A HREF="#index">Index</A>
-<A HREF="https://linux.die.net/man/1/man2html">Return to Main Contents</A><HR>
+<A HREF="http://localhosthttps://linux.die.net/man/1/man2html">Return to Main Contents</A><HR>
 
 <A NAME="lbAB">&nbsp;</A>
 <H2>NAME</H2>
@@ -22,7 +21,6 @@ checks files, data streams or block devices for duplicate blocks to estimate ded
 efficiency on dedupe capable storage systems, using key-value stores in SQLite,
 MD5 hashing and LZ4 compression.  It also estimates compression ratios for all-flash arrays
 XtremIO X1 and X2 as well as VMAX AFA (experimental).
-<P>
 
 <P>
 <A NAME="lbAE">&nbsp;</A>
@@ -39,7 +37,6 @@ For additional safety, run
 as non-root user. See the 
 <B>SECURITY AND SAFETY</B>
 section for details on how to do this.
-<P>
 
 <A NAME="lbAF">&nbsp;</A>
 <H2>OPTIONS</H2>
@@ -114,57 +111,52 @@ find blocks with hash=&lt;hash&gt; in staging db
 <DT><B>--tophash &lt;num&gt;</B>
 <DD>
 show top &lt;num&gt; hashes by refcount
+<DT><B>--squash </B>
+<DD>
+set all refcounts to 1
 <DT><B>--mandump </B>
 <DD>
 dump raw manpage to stdout
-</DL>
-<P>
+<DT><B>--demo </B>
+<DD>
+show quick demo
 
-<P>
 <P>
 
 <B>FILE</B>
 description:
-<P>
 
 FILE is usually a disk device such as /dev/sda but can also be a flat file, a named pipe, a disk partition or anything else that can be
 read as a stream. It will also read from stdin if it is not connected to a tty, i.e. you can do 'cat &lt;file&gt; | qdda '.
-<P>
 
 <B>Modifiers</B>
-<P>
 
 Each file can have a modifier by adding a colon (:). Currently the modifier is in the format &lt;maxmb[,dup]&gt; where maxmb
 is the maximum amount of mibibytes to read from the stream: /dev/sda:1024 will read the first 1024MiB and then stop. dup is the
 number of times the data is processed (only for testing purposes) i.e. /dev/sda:1024,2 will generate 2048 MiB with dupcount=2 
 (the first 1024 MiB of sda but processed twice).
-<P>
 
 <B>Special&nbsp;filenames</B>
-<P>
 
 Special filenames are zero (alias for /dev/zero), random (alias for /dev/urandom) and compress (same as random but make the
 data compressible). This allows you to generate test data.
-<P>
 
 <B>Test data example</B>
-<P>
 
 qdda zero:512 random:512 random:256,2 compress:128,4
 <BR>
 
 Generates a test dataset with 512MiB zeroed, 512MiB uncompressible, unique data, 256MiB uncompressible data used twice, and 128MiB 
 compressible data with 4 copies each.
-<P>
 
 <P>
+</DL>
 <A NAME="lbAG">&nbsp;</A>
 <H2>STORAGE ARRAYS</H2>
 
 Currently qdda supports 3 storage arrays:
 <BR>
 
-<P>
 
 <DL COMPACT>
 <DT>XtremIO&nbsp;X1&nbsp;(--array=x1)<DD>
@@ -192,14 +184,12 @@ Specify a string with array=name=&lt;name&gt;,bs=&lt;blocksize_kb&gt;,buckets=&l
 <BR>
 
 example: qdda --array=name=foo,bs=64,buckets=8+16+32+48+64
-</DL>
-<P>
 
 The compress and hash algorithms are slightly different from these actual arrays
 and the results are a (close) approximation of the real array data reduction.
 Currently qdda only uses LZ4 (default) compression.
-<P>
 
+</DL>
 <A NAME="lbAH">&nbsp;</A>
 <H2>ERRORS</H2>
 
@@ -207,7 +197,7 @@ Currently qdda only uses LZ4 (default) compression.
 has basic error handling. Most errors result in simply aborting with an error message and return code.
 <BR>
 
-Currently aborting qdda with ctrl-c may result in database corruption.
+Currently aborting qdda with ctrl-c may result in corruption of the SQLite QDDA database.
 <P>
 <A NAME="lbAI">&nbsp;</A>
 <H2>EXAMPLE</H2>
@@ -216,8 +206,6 @@ Currently aborting qdda with ctrl-c may result in database corruption.
 <DT><B>qdda compress:128,4 compress:256,2 compress:512 zero:512</B>
 <DD>
 Analyze a compressible reference test data set with 128Mx4, 256Mx2, 512x1 and 512M zeroed.
-</DL>
-<P>
 
 <B>Example output</B>
 <PRE>
@@ -252,9 +240,9 @@ raw capacity        =     2048.00 MiB
 net capacity        =      483.25 MiB
 </PRE>
 
+</DL>
 <P>
 
-<P>
 
 <B>Explanation</B>
 <DL COMPACT>
@@ -301,15 +289,10 @@ Overall data reduction (dedupe ratio * compress ratio * thin ratio)
 equal to total
 <DT>net&nbsp;capacity<DD>
 equal to allocated
-</DL>
-<P>
 
-<DL COMPACT>
 <DT><B>qdda --detail</B>
 <DD>
 Show detailed histograms from the database
-</DL>
-<P>
 
 <B>Example output</B>
 <PRE>
@@ -348,17 +331,13 @@ size          buckets         perc       blocks          MiB
 Total:          57344       100.00        30928       483.25
 </PRE>
 
-<P>
 
 <B>Explanation</B>
-<P>
 
 <B>File&nbsp;list</B>
 shows info on the files that were scanned.
-<P>
 
 <B>Dedupe&nbsp;histogram</B>
-<P>
 
 shows the distribution of duplicate counts of the scanned blocks. The first row (0) is a special case and shows
 how many blocks were blank (zeroed). Each other row shows dupcount (how many copies of each block were found), the amount of blocks,
@@ -368,10 +347,8 @@ which means qdda found 4 blocks to be the same (dupcount 4), 4 more blocks being
 The row with dup=1 means these are unique blocks in the dataset. A very high dupcount usually is the result of some special blocks such as 
 filled with ones (0xFFFFFFFF...) or other common data structures such as metadata or padding blocks.
 In our reference test set the dupcounts are distributed evenly.
-<P>
 
 <B>Compression&nbsp;histogram</B>
-<P>
 
 qdda will calculate the compressed size for each (deduped) block and sort it into 1KiB multiples. Then it will sort the amounts into
 the defined bucket sizes for the array. For example XtremIO X1 has bucket sizes 2K,4K, 8K. A block with a compressed size between 1 and
@@ -386,13 +363,10 @@ into 1K buckets. The array has a blocksize of 16K so in order to store 3360 1K b
 <BR>
 
 3768 blocks could not be compressed in less than 16K so these are stored 1:1.
-<P>
 
 <B>qdda --tophash 5</B>
-<P>
 
 Shows the 5 most common hash values in the database. Note that these are the 60-bit truncated MD5 hashes of each block.
-<P>
 
 <B>Example output</B>
 <BR>
@@ -407,16 +381,13 @@ hash                 blocks
 941619753194353532   9      
 </PRE>
 
-<P>
 
 <B>Explanation</B>
-<P>
 
 We see that 452707908990536042 is the most common hash in the database with a dupcount of 402. To find out what the contents are of a
 block that has this hash value, we can scan the data again but keep the staging database with the --nomerge option
 as the staging database keeps all the offsets of the block hashes (if we only scan one file). We can then query the staging database for
 the offsets (will look for the 2nd most common hash, 110182122676868616):
-<P>
 
 sqlite3 qdda-staging.db &quot;select * from offsets where hash=110182122676868616 limit 2&quot;
 <BR>
@@ -428,14 +399,11 @@ hash                hexhash             offset      bytes
 110182122676868616  0x0187720e8ac0d608  182         2981888   
 </PRE>
 
-<P>
 
 We see that the hash appears on block offsets 181 and 182 (and 144 more but we limit the query to the first 2).
 We can hexdump the contents of this particular block to see what's in there:
-<P>
 
 dd bs=16K status=none count=1 if=/dev/sda skip=181 | hexdump -Cv|head
-<P>
 
 <PRE>
 00000000  ff ff ff ff ff ff ff ff  ff ff ff ff ff ff ff ff  |................|
@@ -446,10 +414,8 @@ etc...
 </PRE>
 
 We can verify the MD5 hash:
-<P>
 
 dd bs=16K status=none count=1 if=/dev/sda skip=181 | md5sum 
-<P>
 
 <PRE>
 92ab673d915a94dcf187720e8ac0d608  -
@@ -457,25 +423,24 @@ dd bs=16K status=none count=1 if=/dev/sda skip=181 | md5sum
 </PRE>
 
 <P>
+</DL>
 <A NAME="lbAJ">&nbsp;</A>
 <H2>COMBINING MULTIPLE SCANS</H2>
 
 By default, when scanning data, qdda deletes the existing database and creates a new one. Using the --append option you can
 keep existing data and add more file(s) to the existing database:
-<P>
 
 qdda /dev/&lt;disk1&gt;
 qdda --append /dev/&lt;disk2&gt;
-<P>
 
 It is also possible to join 2 databases together using --import:
-<P>
 
 <PRE>
 qdda --delete
 qdda --db db1 random:512
 qdda --db db2 random:512
 qdda --import db1.db
+qdda --import db2.db
 </PRE>
 
 <P>
@@ -483,7 +448,6 @@ qdda --import db1.db
 <H2>RESOURCE REQUIREMENTS</H2>
 
 <B>Storage capacity</B>
-<P>
 
 During scans, data is stored in a SQLite staging database table with 2 columns (hash and bytes).
 The hash is usually a large integer requiring 8 bytes, bytes is another int which is usually 2 bytes (sometimes 3 when
@@ -499,11 +463,9 @@ the staging table is then 67108864 * 21 = 1,409,286,144 bytes = 1344 MiB (not in
 <BR>
 
 So at 16K blocksize the database capacity for scanning is roughly 0.11% of the data size.
-<P>
 
 After scanning the primary database will be updated from the staging database (merge process). During merge the required capacity is double
 the size or 0.22% for both databases, however, SQLite also creates hidden temporary tables which require another 0.22%.
-<P>
 
 Sizing summary for a 1TiB random dataset:
 <BR>
@@ -515,13 +477,11 @@ Temp tables      - 2800MiB (hidden, deleted after merging)
 Total            - 5600MiB (file system free space required, or 0.56%)
 </PRE>
 
-<P>
 
 A (very) safe assumption for reserved space for qdda is 1% of data size for a blocksize of 16kb.
 <BR>
 
 After merging the data, the staging database is deleted and the database size is about 0.12% of the original data size (at 16K blocksize).
-<P>
 
 <B>Default SQLite storage locations:</B>
 <BR>
@@ -533,21 +493,16 @@ Staging database: $HOME/qdda-staging.db
 <BR>
 
 Temp storage: /var/tmp
-<P>
 
 Note that you may change the locations of primary and staging database (--db &lt;file&gt; option) and for the hidden temp tables
 (--tmpdir &lt;path&gt; option or by setting SQLITE_TMPDIR).
-<P>
 
 <B>I/O requirements</B>
-<P>
 
 qdda will scan data at 200MB/s throttled using large blocks, concurrently reading all files. If throttling is disabled, qdda will scan
 as fast as possible until CPU power for processing the data or writing to the database becomes the bottleneck.
-<P>
 
 <B>CPU</B>
-<P>
 
 <B>qdda</B>
 starts a separate reader thread for each given file or stream (max 32), and a number of worker threads equivalent to the number of CPU cores
@@ -557,10 +512,8 @@ unless the amount of workers and readers is changed via command line options.
 If the amount of readers is less than the number of files, each reader will process one file at a time so some files will be on the wait
 queue until another file is completed. If the amount of workers is set to less than the amount of CPU cores, hashing and compression
 will be limited to those threads.
-<P>
 
 <B>Memory</B>
-<P>
 
 <B>qdda</B>
 allocates a number of read buffers which are 1 MiB each. The amount of buffers is set to #workers + #readers + 32. So on a
@@ -573,17 +526,14 @@ qdda also requires additional memory for SQLite, etc. but the total required mem
 <H2>EXPLANATION</H2>
 
 How qdda works:
-<P>
 
 Each stream (device, file or pipe) is scanned where each block is hashed and compressed.
-<P>
 
 The results (hash,compressed_bytes) go into a staging table. At the end of processing, the
 staging data is merged into the main kv table (which actually holds 3 columns: hash - blocks - compressed_bytes).
 <BR>
 
 The report is then generated by querying the kv table.
-<P>
 
 <B>Hashing:</B>
 <P>
@@ -594,14 +544,12 @@ better performance, and a very low amount of collisions will not impact the resu
 See also the
 <B>ACCURACY</B>
 section.
-<P>
 
 <B>Compression:</B>
 <P>
 Some All-Flash arrays use &quot;bucket&quot; compression to achieve high throughput, low overhead and good compression. 
 qdda simulates compression uzing LZ4 compression. LZ4 has very high throughput and the compression ratios
 are very close to what All-Flash Arrays can achieve.
-<P>
 <P>
 
 <B>Bucket Compression:</B>
@@ -612,7 +560,6 @@ XtremIO has bucket sizes of 1K to 16K with 1K steps. Say an incoming 16K block c
 where this would fit into is the 5K bucket which means the remaining 676 bytes in the bucket are not used. This causes a slightly lower
 compress ratio but vastly improves performance and reduces fragmentation and partial write issues.
 <P>
-<P>
 
 <B>Throttling:</B>
 <P>
@@ -620,7 +567,6 @@ qdda processes a number of blocks per read IO and measures the service time.
 If the service time is too low it means the throughput is
 higher than the bandwidth limit. The reader is then put to sleep for a number of microseconds to match the overall bandwidth limit.
 This prevents accidentally starving IO on a production host. Disable throttling with '--bandwidth 0' or set a different bandwidth.
-<P>
 <P>
 
 <B>Blocksize:</B>
@@ -632,7 +578,6 @@ with matching blocksizes can be merged or combined. The maximum blocksize is cur
 <H2>ACCURACY</H2>
 
 <B>Notes on hash algorithm</B>
-<P>
 
 <B>qdda</B>
 uses an integer field to store the hash value in SQLite. 
@@ -660,10 +605,8 @@ accuracy and has a 50% chance of a single collision with ~ 1.2 billion rows (At 
 which is fine for datasets up to many terabytes.
 A 64-bit hash would get roughly 1 collision every 77TB@16K. A collision would be a serious problem for a deduplicating storage array
 but for an analysis tool a few collisions are not a serious problem so we can get away with using truncated hashes.
-<P>
 
 <B>Notes on compression algorithm</B>
-<P>
 
 <B>qdda</B>
 uses LZ4 with default parameters for compression. Some storage arrays (including XtremIO) use a proprietary compression algorithm
@@ -699,17 +642,14 @@ DB insert:             52301 usec,   20530.04 MB/s,  1253054.38 rows/s
 
 
 
-<P>
 
 The overview shows how fast a single core can hash, compress and update a dataset of the given size (this is on an
 Intel Core i5-4440 CPU @ 3.10GHz). The reference dataset is a random(ish) block of data and the numbers are an indication only. 
 Note that the compress rate is inaccurate but repeatable. A real dataset is usually less random and may show higher or lower speeds.
-<P>
 
 A data scan by default will allocate 1 thread per file, 1 thread for database updates and the number of worker threads equal to the
 amount of cpu cures. Experience shows that the bottleneck is usually read IO bandwidth until the database updater is maxed out (on a 
 fast reference system this happened at about 7000MB/s). Future versions may use multiple updater threads to avoid this bottleneck.
-<P>
 
 After data scan the staging data has to be merged with the primary database. This is done by joining existing data with staging data
 and running an 'insert or replace' job in SQLite. Testing the speed can be done with the --dbtest option. Output of a merge of
@@ -724,7 +664,6 @@ Merging 67108864 blocks (1048576 MiB) with 0 blocks (0 MiB) in 157.28 sec (42668
 
 
 
-<P>
 
 Tuning - You may speed up I/O by altering the default database location from $HOME/qdda.db to another path with the '-d' option,
 to a faster file system (such as SSD based). You can also set the SQLite TEMP dir to an alternative location with '--tmpdir &lt;dir&gt;'
@@ -761,11 +700,9 @@ if SQLITE_TMPDIR is not set, TMPDIR is used for temp tables
 is safe to run even on files/devices that are in use. It opens streams read-only and by design, it cannot modify any files except 
 SQLite3 database files. It writes to a database file that needs to be either newly created or a pre-existing SQLite3 database.
 It can remove the database file but ONLY if it is an SQLite3 file.
-<P>
 
 For added safety you may run qdda as a non-privileged user. However, non-root users usually do not have read access to block devices.
 To run qdda in a safe way, there are various methods you need to provide read access to the disk devices you need to scan.
-<P>
 
 Changing the group/permissions using chmod on /dev/&lt;disk&gt; is problematic as it either gives all users read access
 or alters permissions which may break other applications such as Oracle ASM. 
@@ -784,7 +721,7 @@ setfacl -m u:&lt;user&gt;:r /dev/&lt;disk&gt;
 <BR>
 
 This gives &lt;user&gt; read-only access without altering any of the existing ownerships/permissions. The permissions will 
-typically be reset at next reboot or through <A HREF="https://linux.die.net/man/1/man2html?7+udev">udev</A>(7).
+typically be reset at next reboot or through <A HREF="http://localhosthttps://linux.die.net/man/1/man2html?7+udev">udev</A>(7).
 You need to have ACL enabled on the file system containing /dev/ and the setfacl tool installed.
 <P>
 <A NAME="lbAR">&nbsp;</A>
@@ -806,13 +743,12 @@ source host: (as root)
 <BR>
 
 cat /dev/&lt;disk&gt; | nc targethost 19000
-<P>
 
 <P>
 <A NAME="lbAS">&nbsp;</A>
 <H2>KNOWN ISSUES</H2>
 
-Database journaling and synchronous mode are disabled for performance reasons. This means the database may be corrupted if qdda is ended
+Database journaling and synchronous mode are disabled for performance reasons. This means the internal database may be corrupted if qdda is ended
 in an abnormal way (killed, file system full, etc).
 <BR>
 
@@ -831,7 +767,7 @@ Dumping multiple devices to a single pipe (i.e. cat /dev/sda /dev/sdb | qdda) ma
 <A NAME="lbAT">&nbsp;</A>
 <H2>SEE ALSO</H2>
 
-<A HREF="https://linux.die.net/man/1/man2html?1+lz4">lz4</A>(1), <A HREF="/cgi-bin/man/man2html?1+md5">md5</A>(1), <A HREF="/cgi-bin/man/man2html?1+sqlite3">sqlite3</A>(1), <A HREF="/cgi-bin/man/man2html?1+mkfifo">mkfifo</A>(1), <A HREF="/cgi-bin/man/man2html?1+nc">nc</A>(1), <A HREF="/cgi-bin/man/man2html?7+udev">udev</A>(7), <A HREF="/cgi-bin/man/man2html?1+setfacl">setfacl</A>(1)
+<A HREF="http://localhosthttps://linux.die.net/man/1/man2html?1+lz4">lz4</A>(1), <A HREF="http://localhost/cgi-bin/man/man2html?1+md5">md5</A>(1), <A HREF="http://localhost/cgi-bin/man/man2html?1+sqlite3">sqlite3</A>(1), <A HREF="http://localhost/cgi-bin/man/man2html?1+mkfifo">mkfifo</A>(1), <A HREF="http://localhost/cgi-bin/man/man2html?1+nc">nc</A>(1), <A HREF="http://localhost/cgi-bin/man/man2html?7+udev">udev</A>(7), <A HREF="http://localhost/cgi-bin/man/man2html?1+setfacl">setfacl</A>(1)
 <P>
 <A NAME="lbAU">&nbsp;</A>
 <H2>AUTHOR</H2>
@@ -888,8 +824,8 @@ responsible for any problems you may encounter with this software.
 </DL>
 <HR>
 This document was created by
-<A HREF="https://linux.die.net/man/1/man2html">man2html</A>,
+<A HREF="http://localhosthttps://linux.die.net/man/1/man2html">man2html</A>,
 using the manual pages.<BR>
-Time: 10:11:21 GMT, April 29, 2018
+Time: 11:35:35 GMT, July 03, 2018
 </BODY>
 </HTML>
