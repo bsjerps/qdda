@@ -1,6 +1,6 @@
 Summary:	The quick & dirty dedupe analyzer
 Name:		qdda
-Version:	2.0.9
+Version:	2.0.10
 Release:	1%{?prerel:.~%prerel}
 URL:		https://github.com/outrunnl/qdda
 Source0:	%{name}-%{version}.tbz2

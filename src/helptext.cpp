@@ -101,7 +101,7 @@ Currently qdda only uses LZ4 (default) compression.
 .B qdda
 has basic error handling. Most errors result in simply aborting with an error message and return code.
 .br
-Currently aborting qdda with ctrl-c may result in database corruption.
+Currently aborting qdda with ctrl-c may result in corruption of the SQLite QDDA database.
 
 .SH EXAMPLE
 .TP 
@@ -324,6 +324,7 @@ qdda --delete
 qdda --db db1 random:512
 qdda --db db2 random:512
 qdda --import db1.db
+qdda --import db2.db
 .fi
 
 .SH RESOURCE REQUIREMENTS
@@ -574,7 +575,7 @@ cat /dev/<disk> | nc targethost 19000
 .P
 
 .SH KNOWN ISSUES
-Database journaling and synchronous mode are disabled for performance reasons. This means the database may be corrupted if qdda is ended
+Database journaling and synchronous mode are disabled for performance reasons. This means the internal database may be corrupted if qdda is ended
 in an abnormal way (killed, file system full, etc).
 .br
 Accessing the SQLite database directly requires recent versions of the sqlite3 tools. Older versions are not compatible with the database
