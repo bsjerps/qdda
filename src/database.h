@@ -59,6 +59,7 @@ public:
   Query& operator<< (const std::string&);
   
 private:
+  void init(sqlite3* db, const char*); // shared constructor due to C++03
   Query(const Query&);              // disable copy i.e. auto = (Query)
   int step();                       // execute query
   int reset();                      // reset for next execution

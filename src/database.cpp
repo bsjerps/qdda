@@ -71,7 +71,10 @@ int fileDeleteSqlite3(const string& fn) { return fileDeleteSqlite3(fn.c_str()); 
  * Query class functions
  ******************************************************************************/
 
-Query::Query(sqlite3* db, const char* query) {
+Query::Query(Database& db, const char* query) { init(db.db, query) ;}
+Query::Query(sqlite3* db, const char* query)  { init(db, query) ;}
+
+void Query::init(sqlite3* db, const char* query) {
   ref = 0; // reset parameter count
   if(!db) throw ERROR("sqlite3 not initialized ") << query;
   const char * pzTest;
@@ -79,8 +82,6 @@ Query::Query(sqlite3* db, const char* query) {
   if(rc==SQLITE_OK) return;
   throw ERROR("Peparing MySQL query:") << query << ", " << sqlite3_errmsg(db);
 }
-
-Query::Query(Database& db, const char* query): Query(db.db, query) { }
 
 Query::~Query()               { sqlite3_finalize(pStmt);}
 const char* Query::sqlerror() { return sqlite3_errmsg(sqlite3_db_handle(pStmt)); }
