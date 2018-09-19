@@ -6,6 +6,36 @@
  * Disclaimer  : See https://www.gnu.org/licenses/gpl-3.0.txt
  * More info   : http://outrun.nl/wiki/qdda
  * -----------------------------------------------------------------------------
+S * Revision history:
+ * 1.0   - First published version
+ * 1.2.1 - changed mhash crc32 to zlib crc32 (get rid of mhash lib dependency)
+ *         changed zlib to lz4 compression (much better performance)
+ *         now analyze all blocks for compression
+ *         added thin ratio and other output changes
+ * 1.3.0 - added All flash array aware compression (buckets), variable blocksize
+ * 1.4.1 - Various improvements
+ * 1.5.1 - Major performance increase when processing large amounts of data
+ * 1.6.0 - Import function, file list, purge always after scanning, histograms
+ * 1.7.0 - Change to MD5, performance improvements, tmpdir, improved reports
+ * 1.7.1 - Minor bugfixes, improved long report, improved progress indicator,
+ *         -a (append) option replaces -k (keep)
+ * 1.7.2 - Fix rounding error, minor output changes
+ * 1.7.3 - Replace openssl with compiled-in MD5 function (no dependency 
+ *         on ssl libs). Increased max blocksize to 128K
+ * 1.8.0 - Updated compression support, default blocksize now 16K
+ * 1.8.2 - Bugfixes, updated reporting & documentation
+ * 1.9.0 - Added 128K compression support, split primary and staging DB, 
+ *         code cleanup, minor bugfixes, experimental VMAX compression
+ * 2.0.0 - Multithreading and rewrite
+ * 2.0.1 - Bugfix max filesize
+ * 2.0.2 - Dynamic version strings
+ * 2.0.3 - Various updates
+ * 2.0.4 - Many improvements & fixes
+ * 2.0.5 - Report blocksize fix
+ * 2.0.6 - Exception handling
+ * 2.0.7 - Bugfix for EOF while reading
+ * 2.0.8 - Reduced max reader threads from 32 to 8
+ * ---------------------------------------------------------------------------
  ******************************************************************************/
  
 const char* manpage_head = R"(.TH qdda 1 "2018-03-24" "QDDA" "QDDA User Manual"

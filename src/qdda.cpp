@@ -6,36 +6,6 @@
  * Disclaimer  : See https://www.gnu.org/licenses/gpl-3.0.txt
  * More info   : http://outrun.nl/wiki/qdda
  * -----------------------------------------------------------------------------
- * Revision history:
- * 1.0   - First published version
- * 1.2.1 - changed mhash crc32 to zlib crc32 (get rid of mhash lib dependency)
- *         changed zlib to lz4 compression (much better performance)
- *         now analyze all blocks for compression
- *         added thin ratio and other output changes
- * 1.3.0 - added All flash array aware compression (buckets), variable blocksize
- * 1.4.1 - Various improvements
- * 1.5.1 - Major performance increase when processing large amounts of data
- * 1.6.0 - Import function, file list, purge always after scanning, histograms
- * 1.7.0 - Change to MD5, performance improvements, tmpdir, improved reports
- * 1.7.1 - Minor bugfixes, improved long report, improved progress indicator,
- *         -a (append) option replaces -k (keep)
- * 1.7.2 - Fix rounding error, minor output changes
- * 1.7.3 - Replace openssl with compiled-in MD5 function (no dependency 
- *         on ssl libs). Increased max blocksize to 128K
- * 1.8.0 - Updated compression support, default blocksize now 16K
- * 1.8.2 - Bugfixes, updated reporting & documentation
- * 1.9.0 - Added 128K compression support, split primary and staging DB, 
- *         code cleanup, minor bugfixes, experimental VMAX compression
- * 2.0.0 - Multithreading and rewrite
- * 2.0.1 - Bugfix max filesize
- * 2.0.2 - Dynamic version strings
- * 2.0.3 - Various updates
- * 2.0.4 - Many improvements & fixes
- * 2.0.5 - Report blocksize fix
- * 2.0.6 - Exception handling
- * 2.0.7 - Bugfix for EOF while reading
- * 2.0.8 - Reduced max reader threads from 32 to 8
- * ---------------------------------------------------------------------------
  * Build notes: Requires lz4 >= 1.7.1
  ******************************************************************************/
 
@@ -45,6 +15,7 @@
 #include <fstream>
 #include <string>
 #include <cstring>
+#include <map>
 #include <vector>
 
 #include <unistd.h>
@@ -55,6 +26,7 @@
 
 #include "error.h"
 #include "lz4/lz4.h"
+#include "zlib/zlib.h"
 #include "tools.h"
 #include "database.h"
 #include "qdda.h"
@@ -192,14 +164,35 @@ uint64_t hash_md5(const char * src, char* zerobuf, const int size) {
     ((uint64_t)digest[15]);
 }
 
+// dummy compress function
+u_int compress_none(const char * src, char* buf, const int size) { return size ; }
+  
 // Get compressed bytes for a compressed block - lz4
-u_int compress(const char * src, char* buf, const int size) {
+u_int compress_lz4(const char * src, char* buf, const int size) {
   int result = LZ4_compress_default(src, buf, size, size); // call LZ4 compression lib, only use bytecount & ignore data
   if(result>size) return size;                             // don't compress if size is larger than blocksize
   if(result==0) return size;
   return result;
 }
 
+u_int compress_deflate(const char * src, char* buf, const int size) {
+  int ret;
+  u_int compressed;
+  z_stream strm;
+  strm.zalloc = Z_NULL;
+  strm.zfree  = Z_NULL;
+  strm.opaque = Z_NULL;
+  ret = deflateInit(&strm, 1); // level
+  strm.avail_in  = size;
+  strm.avail_out = size;
+  strm.next_in   = (unsigned char *)src;
+  strm.next_out  = (unsigned char *)buf;
+  ret = deflate(&strm, Z_FINISH);
+  compressed = strm.total_out;
+  (void)deflateEnd(&strm);
+  return compressed;
+}
+  
 /*******************************************************************************
  * Formatting & printing
  ******************************************************************************/
@@ -256,10 +249,10 @@ void progress(ulong blocks,ulong blocksize, ulong bytes, const char * msg) {
 void import(QddaDB& db, const string& filename) {
   if(!fileIsSqlite3(filename)) return;
   QddaDB idb(filename);
-  ulong blocksize = db.blocksize;
-  if(blocksize != idb.blocksize) throw ERROR("Incompatible blocksize on") << filename;
+  ulong blocksize = db.blocksize();
+  if(blocksize != idb.blocksize()) throw ERROR("Incompatible blocksize on") << filename;
 
-  cout << "Adding " << idb.rows << " blocks from " << filename << " to " << db.rows << " existing blocks" << endl;
+  cout << "Adding " << idb.getrows() << " blocks from " << filename << " to " << db.getrows() << " existing blocks" << endl;
   db.import(filename);
 }
 
@@ -270,15 +263,15 @@ void merge(QddaDB& db, Parameters& parameters) {
   StagingDB sdb(parameters.stagingname);
 
   //stringstream ss2;
-  ulong blocksize    = db.blocksize;
-  ulong dbrows       = db.rows;
-  ulong tmprows      = sdb.rows;
+  ulong blocksize    = db.blocksize();
+  ulong dbrows       = db.getrows();
+  ulong tmprows      = sdb.getrows();
   ulong mib_staging  = tmprows*blocksize/1024;
   ulong mib_database = dbrows*blocksize/1024;
   ulong fsize1       = db.filesize();
   ulong fsize2       = sdb.filesize();
 
-  if(blocksize != sdb.blocksize) throw ERROR("Incompatible blocksize on stagingdb");
+  if(blocksize != sdb.blocksize()) throw ERROR("Incompatible blocksize on stagingdb");
   
   sdb.close();
 
@@ -312,11 +305,11 @@ void merge(QddaDB& db, Parameters& parameters) {
 // test hashing, compression and insert performance
 void cputest(QddaDB& db, Parameters& p) {
  
-  StagingDB::createdb(p.stagingname,db.blocksize);
+  StagingDB::createdb(p.stagingname,db.blocksize());
   StagingDB stagingdb(p.stagingname);
   
   const ulong mib       = 1024; // size of test set
-  const ulong blocksize = db.blocksize;
+  const ulong blocksize = db.blocksize();
 
   const ulong rows      = mib * 1024 / blocksize;
   const ulong bufsize   = mib * 1024 * 1024;
@@ -349,7 +342,7 @@ void cputest(QddaDB& db, Parameters& p) {
   cout << "Compressing: " << flush;
   stopwatch.reset();
   
-  for(ulong i=0;i<rows;i++) bytes[i] = compress(testdata + i*blocksize*1024,buf,blocksize*1024);
+  for(ulong i=0;i<rows;i++) bytes[i] = compress_deflate(testdata + i*blocksize*1024,buf,blocksize*1024);
   time_compress = stopwatch.lap();
   cout << setw(15) << time_compress << " usec, " 
        << setw(10) << (float)bufsize/time_compress << " MB/s, " 
@@ -422,17 +415,19 @@ void rundemo() {
 
 void findhash(Parameters& parameters) {
   StagingDB db(parameters.stagingname);
-  db.findhash.bind(parameters.searchhash);
-  db.findhash.report(cout,"20,20,10");
+  Query findhash(db,"select * from offsets where hash=?");
+  findhash.bind(parameters.searchhash);
+  findhash.report(cout,"20,20,10");
 }
 
 void tophash(QddaDB& db, int amount = 10) {
-  db.tophash.bind(amount);
-  db.tophash.report(cout,"20,10");
+  Query tophash(db,"select hash,blocks from kv where hash!=0 and blocks>1 order by blocks desc limit ?");
+
+  tophash.bind(amount);
+  tophash.report(cout,"20,10");
 }
 
-void squash(QddaDB& db) {
-  db.squash.exec();
+void update(QddaDB& db) {
   db.update();
 }
 
@@ -465,12 +460,36 @@ void errorTest() {
   throw ERROR("Error test ") << "Extra info: user=" << getenv("USER"); // << std::endl;
 }
 
+const char* Compression::namelist[8] = { "none", "lz4", "deflate"};
+
+void Compression::setMethod(const std::string& in, int interval, int level) {
+  setInterval(interval);
+  //setLevel(level);
+  setMethod(in);
+}
+  
+void Compression::setMethod(const std::string& in) {
+  for(int i=0; namelist[i]!=0;i++) {
+    if(in==namelist[i]) {
+      method = CompressMethod(i);
+      return;
+    }
+  }
+  throw ERROR("Invalid compression method: ") << in;
+}
+
+void Compression::setInterval(int p1) {
+  if(p1<1 || p1>100) throw ERROR("Invalid compression interval: ") << p1;
+  interval = p1;
+}
+
 /*******************************************************************************
  * Main section - process options etc
  ******************************************************************************/
 
 int main(int argc, char** argv) {
   Parameters parameters = {};
+  Options    opts = {};
 
   // set default values
   parameters.workers   = cpuCount();
@@ -479,55 +498,69 @@ int main(int argc, char** argv) {
   parameters.array     = kdefault_array;
 
   Parameters& p = parameters; // shorthand alias
+  Options& o = opts;
   try {
     LongOptions opts;
-    opts.add("version"  ,'V', ""            , showversion,  "show version and copyright info");
-    opts.add("help"     ,'h', ""            , p.do_help,    "show usage");
-    opts.add("man"      ,'m', ""            , manpage,      "show detailed manpage");
-    opts.add("db"       ,'d', "<file>"      , p.dbname,     "database file path (default $HOME/qdda.db)");
-    opts.add("append"   ,'a', ""            , p.append,     "Append data instead of deleting database");
-    opts.add("delete"   , 0 , ""            , p.do_delete,  "Delete database");
-    opts.add("quiet"    ,'q', ""            , g_quiet,      "Don't show progress indicator or intermediate results");
-    opts.add("bandwidth",'b', "<mb/s>"      , p.bandwidth,  "Throttle bandwidth in MB/s (default 200, 0=disable)");
-    opts.add("array"    , 0 , "<id|def>"    , p.array,      "set array type or custom definition <x1|x2|vmax1|definition>");
-    opts.add("list"     ,'l', ""            , showlist,     "list supported array types and custom definition options");
-    opts.add("detail"   ,'x', ""            , p.detail,     "Detailed report (file info and dedupe/compression histograms)");
-    opts.add("dryrun"   ,'n', ""            , p.dryrun,     "skip staging db updates during scan");
-    opts.add("purge"    , 0 , ""            , p.do_purge,   "Reclaim unused space in database (sqlite vacuum)");
-    opts.add("import"   , 0 , "<file>"      , p.import,     "import another database (must have compatible metadata)");
-    opts.add("cputest"  , 0 , ""            , p.do_cputest, "Single thread CPU performance test");
-    opts.add("nomerge"  , 0 , ""            , p.skip,       "Skip staging data merge and reporting, keep staging database");
-    opts.add("debug"    , 0 , ""            , g_debug,      "Enable debug output");
-    opts.add("queries"  , 0 , ""            , g_query,      "Show SQLite queries and results"); // --show?
-    opts.add("tmpdir"   , 0 , "<dir>"       , p.tmpdir,     "Set $SQLITE_TMPDIR for temporary files");
-    opts.add("workers"  , 0 , "<wthreads>"  , p.workers,    "number of worker threads");
-    opts.add("readers"  , 0 , "<rthreads>"  , p.readers,    "(max) number of reader threads");
-    opts.add("findhash" , 0 , "<hash>"      , p.searchhash, "find blocks with hash=<hash> in staging db");
-    opts.add("tophash"  , 0 , "<num>"       , p.tophash,    "show top <num> hashes by refcount");
-    opts.add("squash"   , 0 , ""            , p.squash,     "set all refcounts to 1");
-    opts.add("mandump"  , 0 , ""            , p.do_mandump, "dump raw manpage to stdout");
-    opts.add("demo"     , 0 , ""            , rundemo,      "show quick demo");
+    opts.add("version"  ,'V', ""                , showversion,  "show version and copyright info");
+    opts.add("help"     ,'h', ""                , o.do_help,    "show usage");
+    opts.add("man"      ,'m', ""                , manpage,      "show detailed manpage");
+    opts.add("db"       ,'d', "<file>"          , o.dbname,     "database file path (default $HOME/qdda.db)");
+    opts.add("append"   ,'a', ""                , o.append,     "Append data instead of deleting database");
+    opts.add("delete"   , 0 , ""                , o.do_delete,  "Delete database");
+    opts.add("quiet"    ,'q', ""                , g_quiet,      "Don't show progress indicator or intermediate results");
+    opts.add("bandwidth",'b', "<mb/s>"          , p.bandwidth,  "Throttle bandwidth in MB/s (default 200, 0=disable)");
+    opts.add("array"    , 0 , "<id|def>"        , p.array,      "set array type or custom definition <x1|x2|vmax1|definition>");
+    opts.add("compress" , 0 , "<none|lz4|zlib>" , o.compress,   "set compression method (default=lz4)");
+    opts.add("level"    , 0 , "<level>"         , p.level,      "set compression level [TBD] (see docs)");
+    opts.add("interval" , 0 , "<n>       "      , p.interval,   "set compression sample interval (sample 1 per n blocks)");
+    opts.add("buckets"  , 0 , "<list>"          , p.buckets,    "set list of compress buckets");
+    opts.add("list"     ,'l', ""                , showlist,     "list supported array types and custom definition options");
+    opts.add("detail"   ,'x', ""                , p.detail,     "Detailed report (file info and dedupe/compression histograms)");
+    opts.add("dryrun"   ,'n', ""                , p.dryrun,     "skip staging db updates during scan");
+    opts.add("purge"    , 0 , ""                , o.do_purge,   "Reclaim unused space in database (sqlite vacuum)");
+    opts.add("import"   , 0 , "<file>"          , p.import,     "import another database (must have compatible metadata)");
+    opts.add("cputest"  , 0 , ""                , o.do_cputest, "Single thread CPU performance test");
+    opts.add("nomerge"  , 0 , ""                , p.skip,       "Skip staging data merge and reporting, keep staging database");
+    opts.add("debug"    , 0 , ""                , g_debug,      "Enable debug output");
+    opts.add("queries"  , 0 , ""                , g_query,      "Show SQLite queries and results"); // --show?
+    opts.add("tmpdir"   , 0 , "<dir>"           , p.tmpdir,     "Set $SQLITE_TMPDIR for temporary files");
+    opts.add("workers"  , 0 , "<wthreads>"      , p.workers,    "number of worker threads");
+    opts.add("readers"  , 0 , "<rthreads>"      , p.readers,    "(max) number of reader threads");
+    opts.add("findhash" , 0 , "<hash>"          , p.searchhash, "find blocks with hash=<hash> in staging db");
+    opts.add("tophash"  , 0 , "<num>"           , p.tophash,    "show top <num> hashes by refcount");
+    opts.add("squash"   , 0 , ""                , p.squash,     "set all refcounts to 1");
+    opts.add("mandump"  , 0 , ""                , o.do_mandump, "dump raw manpage to stdout");
+    opts.add("demo"     , 0 , ""                , rundemo,      "show quick demo");
 #ifdef __DEBUG
-    opts.add("buffers"  , 0 , "<buffers>"   , p.buffers,    "number of buffers (debug only!)");
-    opts.add("extest"   , 0 , ""            , errorTest,    "Test error handling");
+    opts.add("update"   , 0 , ""                , o.do_update,  "update temp tables (debug only!)");
+    opts.add("buffers"  , 0 , "<buffers>"       , p.buffers,    "number of buffers (debug only!)");
+    opts.add("extest"   , 0 , ""                , errorTest,    "Test error handling");
 #endif
   
     int rc=opts.parse(argc,argv);
     if(rc) return 0; // opts.parse executed a message function
   
-    if(p.do_help)         { showhelp(opts); return 0; }
-    else if(p.do_mandump) { mandump(opts); return 0; }
+    if(o.do_help)         { showhelp(opts); return 0; }
+    else if(o.do_mandump) { mandump(opts); return 0; }
     
     if(!p.tmpdir.empty()) setenv("SQLITE_TMPDIR",p.tmpdir.c_str(),1);
   
     showtitle();
-    ParseFileName(p.dbname);
-    p.stagingname = genStagingName(p.dbname);
+    ParseFileName(o.dbname);
+    p.stagingname = genStagingName(o.dbname);
     
-    if(p.do_delete)  {
-      if(!g_quiet) cout << "Deleting database " << p.dbname << endl;
-      Database::deletedb(p.dbname); return 0;
+    if(o.do_delete)  {
+      if(!g_quiet) cout << "Deleting database " << o.dbname << endl;
+      Database::deletedb(o.dbname); return 0;
     }
+
+    if     (p.array == "x1")    { p.blocksize = 8;   p.compression.setMethod("lz4",1,0);   p.buckets="2+4+8" ; }
+    else if(p.array == "x2")    { p.blocksize = 16;  p.compression.setMethod("lz4",1,0);   p.buckets="1+2+3+4+5+6+7+8+9+10+11+12+13+15+16"; }
+    else if(p.array == "vmax1") { p.blocksize = 128; p.compression.setMethod("deflate",20,0); p.buckets="8+16+24+32.40+48+56+64+72+80+88+96+104+112+120+128"; }
+    
+    if(!o.compress.empty()) p.compression.setMethod(o.compress);
+    if(p.interval) p.compression.setInterval(p.interval);
+
   }
   catch (Fatal& e) { e.print(); return 10; }
 
@@ -540,31 +573,34 @@ int main(int argc, char** argv) {
         filelist.push_back(FileData("/dev/stdin"));
       for (int i = optind; i < argc; ++i)
         filelist.push_back(FileData(argv[i]));
-      if(!parameters.append) { // not appending -> delete old database
-        if(!g_quiet) cout << "Creating new database " << p.dbname << endl;
-        Database::deletedb(p.dbname);
-        QddaDB::createdb(p.dbname);
+      if(!o.append) { // not appending -> delete old database
+        if(!g_quiet) cout << "Creating new database " << o.dbname << endl;
+        Database::deletedb(o.dbname);
+        QddaDB::createdb(o.dbname);
       }
     }
-    if(p.do_cputest && !p.append) {
-      if(!g_quiet) cout << "Creating new database " << p.dbname << endl;
-      Database::deletedb(p.dbname);
-      QddaDB::createdb(p.dbname);
+    if(o.do_cputest && !o.append) {
+      if(!g_quiet) cout << "Creating new database " << o.dbname << endl;
+      Database::deletedb(o.dbname);
+      QddaDB::createdb(o.dbname);
     }
-    if(!Database::exists(p.dbname)) QddaDB::createdb(p.dbname);
-    QddaDB db(p.dbname);
-    db.parsemetadata(parameters.array);
+    if(!Database::exists(o.dbname)) QddaDB::createdb(o.dbname);
+    QddaDB db(o.dbname);
+    
+    db.setmetadata(p.blocksize,p.compression,p.array.c_str(),p.buckets);
+
     if(filelist.size()>0) 
       analyze(filelist, db, parameters);
 
     if(g_abort) return 1;
 
-    if(p.do_purge)             { db.vacuum();           }
+    if(o.do_purge)             { db.vacuum();           }
     else if(!p.import.empty()) { import(db,p.import);   }
-    else if(p.do_cputest)      { cputest(db,p) ;        } 
+    else if(o.do_cputest)      { cputest(db,p) ;        }
+    else if(o.do_update)       { update(db) ;           }
     else if(p.searchhash!=0)   { findhash(p);           }
     else if(p.tophash!=0)      { tophash(db,p.tophash); }
-    else if(p.squash!=0)       { squash(db); }
+    else if(p.squash!=0)       { db.squash();           }
     else {
       if(!parameters.skip)     { merge(db,parameters); }
       if(parameters.detail)    { reportDetail(db); }

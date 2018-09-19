@@ -25,6 +25,7 @@ int fileIsSqlite3(const std::string& s);     // test if file is SQLite3 format
 
 struct sqlite3_stmt;
 struct sqlite3;
+class Database;
 
 /*******************************************************************************
  * Query class
@@ -35,21 +36,28 @@ struct sqlite3;
 class Query {
 public:
   Query(sqlite3* db,const char *);  // create and prepare a query
+  Query(Database& db,const char *); // create and prepare a query
   ~Query();                         // call finalize
-  void  printerr(const std::string&);
   void  print(std::ostream& os);    // print the expanded sql after running step()
   const char *sql();                // return the query text
   int   bind(const ulong);          // bind next parameter
   int   bind(const char*);          // same for char*
   int   bind(const std::string&);   // same for string
+  int   bind();                     // bind NULL
   void  exec();                     // execute query, ignore results
   ulong execl();                    // execute query, return ulong
+  float execf();                    // execute query, return float
   ulong execl(ulong p);             // same but bind parameter first
   ulong execl(ulong p,ulong q);     // 2 parameters
-  const std::string str();          // return string result
+  const std::string execstr();      // return string result
   const char * sqlerror();          // show error message
-  operator const ulong();           // default type conversion is unsigned long
   void  report(std::ostream& os, const std::string& tabs); // run a query as report
+  // bind operators
+  Query& operator<< (ulong);
+  Query& operator<< (uint32_t);
+  Query& operator<< (const char *);
+  Query& operator<< (const std::string&);
+  
 private:
   Query(const Query&);              // disable copy i.e. auto = (Query)
   int step();                       // execute query
@@ -77,14 +85,18 @@ public:
   void         begin();
   void         end();
   void         vacuum();
+  // ad-hoc select
+  ulong getul(const char *); // get single ulong value from query
+  float getfl(const char *); // get single float value from query
+  const std::string getstr(const char *); // get string value from query
 protected:
-  Query* pq_begin;
-  Query* pq_end;
   void         sql(const std::string& query);
+  void         sql(const char* query);
   sqlite3*     db;           // global sqlite database
   std::string  tmpdir;       // SQLITE_TMPDIR
 private:
   Database(const Database&) = delete;
+  friend class Query;
 };
 
 class StagingDB: public Database {
@@ -96,14 +108,12 @@ public:
   int         fillzero(ulong rows);
   void        insertdata(ulong, ulong);
   int         insertmeta(const std::string& name, ulong blocks, ulong bytes);
-  Query blocksize;
-  Query rows;
-  Query setblocksize;
+  
+  ulong blocksize();
+  ulong getrows();
+  void setblocksize(ulong);
+  
   Query q_insert;
-  Query q_meta;
-  Query q_fillrand;
-  Query q_fillzero;
-  Query findhash;
 };
 
 class QddaDB: public Database {
@@ -115,34 +125,15 @@ public:
   void         merge(const std::string&);
   int          insbucket(const char *,ulong, ulong);
   void         set_comp_method();
-  void         setmetadata(int blocksize, const std::string& compr, const std::string& name, const std::string& buckets);
-  void         parsemetadata(std::string);
+  void         setmetadata(int blocksize, const char* compr, const char* name, const std::string& buckets);
   void         update();
   ulong        gettmpblocksize();
   ulong        gettmprows();
+  const std::string getarrayid();
   void         copymeta();
-  Query hasmeta;
-  Query blocksize;
-  Query arrayid;
-  Query allocatedblocks;          
-  Query zeroblocks;
-  Query totalblocks;
-  Query uniqueblocks;
-  Query nonuniqblocks;
-  Query dedupedblocks;
-  Query bytescompressedraw;
-  Query bytescompressednet;
-  Query usedblocks;
-  Query rows;
-  Query filelist;
-  Query compresshistogram;
-  Query dedupehistogram;
-  Query tophash;
-  Query squash;
-private:
-  Query q_loadbuckets;
-  Query q_truncbuckets;
+  void         squash();
+  
+  ulong blocksize();
+  ulong getrows();
 };
-
-#undef string
 

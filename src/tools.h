@@ -149,7 +149,7 @@ public:
   void  add(const char* name, char c, const char* p, int&         v, const char* desc);
   void  add(const char* name, char c, const char* p, ulong&       v, const char* desc);
   void  add(const char* name, char c, const char* p, std::string& v, const char* desc);
-  void  add(const char* name, char c, const char* p, void (*f)(), const char* desc);
+  void  add(const char* name, char c, const char* p, void (*f)(),    const char* desc);
   int   hasarg(int i) { return strlen(opts[i].optname)?1:0; }
   void  printhelp(std::ostream& os);
   void  printman(std::ostream& os);

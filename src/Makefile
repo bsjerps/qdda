@@ -18,9 +18,12 @@ LIBS       = -lpthread -lstdc++ -ldl
 OBJECTS    = sqlite/sqlite3.o
 OBJECTS   += md5/md5.o
 OBJECTS   += lz4/lz4.o
+OBJECTS   += zlib/libz.a
 
 # disable for prod version
 # CXXFLAGS  += -D__DEBUG
+# Debugger
+# CXXFLAGS  += -ggdb
 
 all: qdda
 

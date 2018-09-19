@@ -14,6 +14,7 @@
 #include <thread>
 #include <string>
 #include <mutex>
+#include <map>
 
 #include <unistd.h>
 #include <sys/types.h>
@@ -278,7 +279,18 @@ void worker(int thread, SharedData& sd, Parameters& parameters) {
   char* dummy           = new char[blocksize*1024];
   size_t i              = 0;
   uint64_t hash;
-  ulong bytes;
+  int bytes;
+  const int interval = parameters.compression.getInterval();
+
+  u_int (*compress)(const char*,char*,const int);
+  Compression cp;
+
+  switch(parameters.compression.getMethod()) {
+    case Compression::lz4     : compress = compress_lz4;     break;
+    case Compression::deflate : compress = compress_deflate; break;
+    default: compress = compress_none;
+  }
+
   while (true) {
     if(g_abort) break;
     int rc = sd.rb.getfull(i);
@@ -287,7 +299,11 @@ void worker(int thread, SharedData& sd, Parameters& parameters) {
       if(g_abort) return;
       DataBuffer& r_blockdata = sd.v_databuffer[i]; // shorthand to buffer for readabily
       hash = hash_md5(r_blockdata[j], dummy, blocksize*1024); // get hash
-      bytes = hash ? compress(r_blockdata[j], dummy, blocksize*1024) : 0; // get bytes, 0 if hash=0
+      
+      if(rand()%interval==0)
+        bytes = hash ? compress(r_blockdata[j], dummy, blocksize*1024) : 0; // get bytes, 0 if hash=0
+      else bytes=-1;
+
       r_blockdata.v_hash[j] = hash;
       r_blockdata.v_bytes[j] = bytes;
       sd.v_databuffer[i].blocks++;
@@ -312,13 +328,13 @@ void analyze(v_FileData& filelist, QddaDB& db, Parameters& parameters) {
   if(g_debug) cout << "Main thread pid " << getpid() << endl;
 
   Database::deletedb(parameters.stagingname);
-  StagingDB::createdb(parameters.stagingname, db.blocksize);
+  StagingDB::createdb(parameters.stagingname, db.blocksize());
   StagingDB stagingdb(parameters.stagingname);
 
   int workers     = parameters.workers;
   int readers     = min( (int)filelist.size(), parameters.readers);
   int buffers     = parameters.buffers ? parameters.buffers : workers + readers + kextra_buffers;
-  ulong blocksize = db.blocksize;
+  ulong blocksize = db.blocksize();
 
   SharedData sd(buffers, filelist.size(), blocksize, &stagingdb, parameters.bandwidth);
 

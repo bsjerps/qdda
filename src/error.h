@@ -33,8 +33,6 @@
 extern bool g_debug;
 
 #define ERROR(...) Fatal(__LINE__,__FILE__, ##__VA_ARGS__)
-#define dumpvar(v)         std::cout << #v << "=" << v << std::endl << std::flush
-
 
 class Fatal: public std::exception {
 public:

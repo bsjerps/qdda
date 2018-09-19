@@ -14,23 +14,17 @@
 #include <fstream>
 #include <string>
 #include <cstring>
-#include <chrono>
 #include <unistd.h>
 
-#include <errno.h>
-#include <sys/stat.h>
-#include <vector>
-#include <list>
 #include "sqlite/sqlite3.h"
 
 #include "error.h"
 #include "tools.h"
-#include "database.h"
+#include "database.h" 
 #include "qdda.h"
 
 extern bool g_debug;
 extern bool g_query;
-extern bool g_abort;
 extern const char* PROGVERSION;
 extern ulong starttime;
 
@@ -86,18 +80,17 @@ Query::Query(sqlite3* db, const char* query) {
   throw ERROR("Peparing MySQL query:") << query << ", " << sqlite3_errmsg(db);
 }
 
-void Query::printerr(const string& str) { 
-  std::cerr << str << std::endl;
-}
+Query::Query(Database& db, const char* query): Query(db.db, query) { }
 
+Query::~Query()               { sqlite3_finalize(pStmt);}
 const char* Query::sqlerror() { return sqlite3_errmsg(sqlite3_db_handle(pStmt)); }
-
-Query::~Query() { 
-  sqlite3_finalize(pStmt);
-}
 const char* Query::sql()      { return sqlite3_sql(pStmt); }
-Query::operator const ulong() { return execl(); }
 
+int Query::bind() {
+  int rc = sqlite3_bind_null(pStmt, ++ref);
+  if(rc!=SQLITE_OK) throw ERROR("MySQL bind variable NULL failed, query: ") << sql() << ", " << sqlerror();
+  return 0;
+}  
 int Query::bind(const ulong p) { 
   int rc = sqlite3_bind_int64(pStmt, ++ref, p);
   if(rc!=SQLITE_OK) throw ERROR("MySQL bind variable ulong failed, query: ") << sql() << ", " << sqlerror();
@@ -150,14 +143,26 @@ ulong Query::execl() {
 ulong Query::execl(ulong p1)           { bind(p1); return execl(); }
 ulong Query::execl(ulong p1, ulong p2) { bind(p1);bind(p2); return execl(); }
 
-// execute prepared statement, return string
-const string Query::str() {
+// simple exec of prepared statement, float return value
+float Query::execf() {
+  step();
+  float retval = sqlite3_column_double(pStmt, 0);
+  if(g_query) std::cout << " = " << retval;
+  // handle multiple rows returned (SQLITE_DONE) ?
+  reset();
+  return retval;
+}
+
+// simple exec of prepared statement, string return value
+const string Query::execstr() {
   string retval;
   const unsigned char * pText = NULL;
   step();
   pText = sqlite3_column_text(pStmt, 0);
   retval = (char*) pText;
+
   if(g_query) std::cout << " = " << retval;
+  // handle multiple rows returned (SQLITE_DONE) ?
   reset();
   return retval;
 }
@@ -214,6 +219,11 @@ void Query::print(std::ostream& os) {
   os << sqlite3_expanded_sql(pStmt);
 }
 
+Query& Query::operator<< (ulong p)         { bind (p); return *this; }
+Query& Query::operator<< (uint32_t p)      { bind (ulong(p)); return *this; }
+Query& Query::operator<< (const char* p)   { bind (p); return *this; }
+Query& Query::operator<< (const string& p) { bind (p); return *this; }
+
 /*******************************************************************************
  * Database class functions
  ******************************************************************************/
@@ -223,9 +233,7 @@ Database::Database(const string& fn) {
   int rc = sqlite3_open_v2(fn.c_str(), &db, SQLITE_OPEN_READWRITE, NULL);
   if(rc) throw ERROR("Can't open database, ") << sqlite3_errmsg(db);
   sql("select count(*) from sqlite_master");
-  if(g_debug) std::cerr << "DB opened: " << fn << std::endl;  
-  pq_begin = new Query(db,"begin transaction");
-  pq_end   = new Query(db,"end transaction");
+  if(g_debug) std::cerr << "DB opened: " << fn << std::endl;
 }
 
 int Database::createdb(const string& fn, const char* schema) {
@@ -247,29 +255,23 @@ int Database::createdb(const string& fn, const char* schema) {
 }
 
 // detach tempdb and finalize all statements before closing db
-Database::~Database()   {
-  delete pq_begin;
-  delete pq_end;
-  close();
-}
-
-void Database::begin()  { pq_begin->exec(); }
-void Database::end()    { pq_end->exec(); }
+Database::~Database()   { close();  }
+void Database::begin()  { sql("begin"); }
+void Database::end()    { sql("end"); }
 
 int Database::attach(const string& schema, const string& fname) {
   Query q(db, "attach database ? as ?");
-  q.bind(fname);
-  q.bind(schema);
+  q << fname << schema;
   q.exec();
   return 0;
 }
 
 int Database::detach(const string& schema) {
   Query q(db, "detach database ?");
-  q.bind(schema);
+  q << schema;
   q.exec();
   return 0;
-}  
+}
 
 void Database::vacuum() { sql("vacuum"); }
 
@@ -321,14 +323,32 @@ int Database::unlinkdb() {
 }
 
 // Run SQL statement, ignore results (update/insert)
-void Database::sql(const string& query) {
+void Database::sql(const char* query) {
   int rc=0;
   char * errmsg;
-  rc = sqlite3_exec(db, query.c_str(), 0, 0, &errmsg);
+  rc = sqlite3_exec(db, query, 0, 0, &errmsg);
   if( rc != SQLITE_OK ) {
     throw ERROR("Cannot execute SQL, ") << query << ", " << sqlite3_errmsg(db);
   }
 }
+
+void Database::sql(const string& query) { sql(query.c_str()); }
+
+ulong Database::getul(const char* query) {
+  Query q(db,query);
+  return q.execl();
+}
+
+float Database::getfl(const char* query) {
+  Query q(db,query);
+  return q.execf();
+}
+
+const string Database::getstr(const char* query) {
+  Query q(db,query);
+  return q.execstr();
+}
+
 
 /*******************************************************************************
  * Staging DB class functions
@@ -347,45 +367,32 @@ CREATE TABLE IF NOT EXISTS staging(id integer primary key autoincrement, hash in
 CREATE VIEW IF NOT EXISTS offsets as with m(b) as (select blksz from metadata) select hash, printf('%0#16x',hash) hexhash, (id-1) offset, (id-1) * m.b*1024 bytes from staging,m
 )");
   StagingDB newdb(fn);
-  newdb.setblocksize.execl(blocksize);
+  newdb.setblocksize(blocksize);
 }
 
 StagingDB::StagingDB(const string& fn): Database(fn),
-  setblocksize  (db,"insert into metadata (blksz,compression) values (?,'lz4')"),
-  blocksize     (db,"select blksz from metadata"),
-  rows          (db,"select count(*) from staging"),
-  q_insert      (db,"insert into staging(hash,bytes) values (?,?)"),
-  q_meta        (db,"insert into files (name,blocks,hostname,timestamp,bytes) values (?,?,?,?,?)"),
-  findhash      (db,"select * from offsets where hash=?"),
-  q_fillrand    (db,R"(
-with recursive 
-rnd(k,b) AS (
-SELECT 1+ABS(RANDOM()%0xFFFFFFFFFFFFFF), 1+ABS(RANDOM())%?2 UNION ALL
-SELECT 1+ABS(RANDOM()%0xFFFFFFFFFFFFFF), 1+ABS(RANDOM())%?2 FROM rnd LIMIT ?1
-),
-c(x) AS (SELECT 0 UNION ALL SELECT X+1 FROM C LIMIT ?3)
-INSERT INTO STAGING SELECT NULL, K,B FROM rnd,c;
-)"),
-
-  q_fillzero(db,R"(
-with recursive 
-rnd(k,b) AS (
-SELECT 0, 0 UNION ALL
-SELECT 0, 0 FROM rnd LIMIT ?1
-) INSERT INTO STAGING SELECT NULL, K,B FROM rnd;
-)")
+  q_insert      (*this,"insert into staging(hash,bytes) values (?,?)")
 {
   sql("PRAGMA schema_version");      // trigger error if not open
   sql("PRAGMA journal_mode = off");  // speed up, don't care about consistency
   sql("PRAGMA synchronous = off");   // same
-  /*
-  sql("PRAGMA cache_spill = off");
-  sql("PRAGMA cache_size = 10000");
-  sql("PRAGMA locking_mode = EXCLUSIVE");
-  */
+  
+  //sql("PRAGMA cache_spill = off");
+  //sql("PRAGMA cache_size = 10000");
+  //sql("PRAGMA locking_mode = EXCLUSIVE");
+
   // mmap_size limits the amount of linux memory cache slots, 
   // this avoids slowing down large scans
   sql("PRAGMA mmap_size = 65536");
+}
+
+ulong StagingDB::blocksize() { return getul("select blksz from metadata"); }
+ulong StagingDB::getrows()   { return getul("select count(*) from staging"); }
+
+void StagingDB::setblocksize(ulong p) {
+  Query q(*this,"insert into metadata (blksz,compression) values (?,'dummy')");
+  q << p;
+  q.exec();
 }
 
 StagingDB::~StagingDB()  { }
@@ -393,35 +400,49 @@ StagingDB::~StagingDB()  { }
 // insert hash, compressed bytes into staging
 void StagingDB::insertdata(ulong hash, ulong bytes) {
   q_insert.bind(hash);
-  q_insert.bind(bytes);
+  if(bytes!=-1) q_insert.bind(bytes);
+  else q_insert.bind();
   q_insert.exec();
 } 
 
 int StagingDB::fillrandom(ulong rows, int blocksize, int dup) {
+  Query q(*this,R"(
+with recursive 
+rnd(k,b) AS (
+SELECT 1+ABS(RANDOM()%0xFFFFFFFFFFFFFF), 1+ABS(RANDOM())%?2 UNION ALL
+SELECT 1+ABS(RANDOM()%0xFFFFFFFFFFFFFF), 1+ABS(RANDOM())%?2 FROM rnd LIMIT ?1
+),
+c(x) AS (SELECT 0 UNION ALL SELECT X+1 FROM C LIMIT ?3)
+INSERT INTO STAGING SELECT NULL, K,B FROM rnd,c;
+)");
   begin();
-  q_fillrand.bind(rows);
-  q_fillrand.bind(blocksize*1024);
-  q_fillrand.bind(dup);
-  q_fillrand.execl();
+  q << rows;
+  q << (ulong)blocksize*1024;
+  q << (ulong)dup;
+  q.exec();
   end();
   return 0;
 }
 
 int StagingDB::fillzero(ulong rows) {
+  Query q(*this,R"(
+with recursive 
+rnd(k,b) AS (
+SELECT 0, 0 UNION ALL
+SELECT 0, 0 FROM rnd LIMIT ?1
+) INSERT INTO STAGING SELECT NULL, K,B FROM rnd;
+)");
   begin();
-  q_fillzero.bind(rows);
-  q_fillzero.execl();
+  q << rows;
+  q.exec();
   end();
   return 0;
 }
 
 int StagingDB::insertmeta(const string& name, ulong blocks, ulong bytes) {
-  q_meta.bind(name);
-  q_meta.bind(blocks);
-  q_meta.bind(hostName());
-  q_meta.bind(starttime);
-  q_meta.bind(bytes);
-  q_meta.exec();
+  Query q(*this,"insert into files (name,blocks,hostname,timestamp,bytes) values (?,?,?,?,?)");
+  q << name << blocks << hostName() << starttime << bytes;
+  q.exec();
   return 0;
 }
 
@@ -429,31 +450,7 @@ int StagingDB::insertmeta(const string& name, ulong blocks, ulong bytes) {
  * QDDA DB class functions
  ******************************************************************************/
 
-QddaDB::QddaDB(const string& fn): Database(fn),
-  hasmeta               (db,"select count(*) from metadata"),
-  blocksize             (db,"select blksz from metadata"),
-  arrayid               (db,"select arrayid from metadata"),
-  allocatedblocks       (db,"select sum(blocks) from v_compressed"),
-  zeroblocks            (db,"select blocks from kv where hash=0"),
-  totalblocks           (db,"select sum(blocks) from kv"),
-  uniqueblocks          (db,"select blocks from m_sums_deduped where ref=1"),
-  nonuniqblocks         (db,"select sum(ref*blocks) from m_sums_deduped where ref>1"),
-  dedupedblocks         (db,"select sum(blocks) from m_sums_deduped"),
-  bytescompressedraw    (db,"select sum(raw) from m_sums_compressed"),
-  bytescompressednet    (db,"select sum(bytes) from m_sums_compressed"),
-  usedblocks            (db,"select sum(ref*blocks) from m_sums_deduped"),
-  rows                  (db,"select count(*) from kv"),
-  compresshistogram(db,"select * from v_compressed union all\n"
-                       "select 'Total:', sum(buckets), sum(perc), sum(blocks), sum(MiB) from v_compressed"),
-  dedupehistogram(db,"select * from v_deduped union all \n"
-                     "select 'Total:',sum(blocks), sum(perc),sum(MiB) from v_deduped"),
-
-  q_loadbuckets         (db,"insert or replace into buckets values (?)"),
-  q_truncbuckets        (db,"delete from buckets"),
-  filelist              (db,"select * from v_files"),
-  tophash               (db,"select hash,blocks from kv where hash!=0 and blocks>1 order by blocks desc limit ?"),
-  squash                (db,"update kv set blocks=1")
-{
+QddaDB::QddaDB(const string& fn): Database(fn) {
   sql("PRAGMA schema_version");      // trigger error if not open
   sql("PRAGMA temp_store_directory = '" + tmpdir + "'");
   // sql("PRAGMA temp_store = 2"); // use memory for temp tables
@@ -461,13 +458,19 @@ QddaDB::QddaDB(const string& fn): Database(fn),
   sql("PRAGMA synchronous = off");   // same
 }
 
+void QddaDB::squash()     { sql("update kv set blocks=1"); update(); }
+ulong QddaDB::blocksize() { return getul("select blksz from metadata"); }
+ulong QddaDB::getrows()   { return getul("select count(*) from kv"); }
+const string QddaDB::getarrayid() { return getstr("select arrayid from metadata"); }
+  
 void QddaDB::createdb(const string& fn) {
   Database::createdb(fn,R"(
 CREATE TABLE IF NOT EXISTS metadata(lock char(1) not null default 1
 , version text
 , blksz integer
-, compression text
-, arrayid text
+, compression text check (compression in ('none', 'lz4', 'deflate')) default 'none'
+, level integer
+, arrayid text check (arrayid in ('custom', 'x1', 'x2', 'vmax1')) default 'none'
 , created integer
 , constraint pk_t1 primary key(lock), constraint ck_t1_l check (lock=1));
 
@@ -495,9 +498,10 @@ from kv where hash!=0 group by 1 order by ref;
 
 CREATE VIEW IF NOT EXISTS v_sums_compressed as
 select ((bytes-1)/1024)+1 size,count(*) blocks
+, sum(blocks) totblocks
 , sum(bytes) bytes
 , sum(bytes*blocks) raw
-from kv where hash!=0 group by (bytes-1)/1024;
+from kv where hash!=0 and bytes not NULL group by (bytes-1)/1024;
 
 CREATE TABLE m_sums_deduped as select * from v_sums_deduped where 1=0;
 CREATE TABLE m_sums_compressed as select * from v_sums_compressed where 1=0;
@@ -528,7 +532,7 @@ CREATE VIEW IF NOT EXISTS v_compressed as
 WITH temp(size, blksz, buckets, blocks, perc) as (
 select size, blksz, blocks, (size*blocks+blksz-1)/blksz, 100.0*blocks/total
 from v_bucket_compressed)
-select size, buckets, perc, blocks, blocks*blksz/1024.0 MiB from temp;
+select size, buckets, buckets*blksz/1024.0 RawMiB, perc, blocks, blocks*blksz/1024.0 MiB from temp;
 )");
 }
 
@@ -541,52 +545,30 @@ select size, buckets, perc, blocks, blocks*blksz/1024.0 MiB from temp;
  * Other methods can be loaded manually into the database after creating the DB
  ******************************************************************************/
 
-void QddaDB::setmetadata(int blocksz, const string& compr, const string& name, const string& buckets) {
+void QddaDB::setmetadata(int blocksz, const char* compr, const char* name, const string& buckets) {
+  if(blocksize()) return; // do nothing if metadata is already set
   if(blocksz>128) throw ERROR("Blocksize too large: ") << blocksz;
-  Query q_meta(db,"insert into metadata (version, blksz, compression, arrayid, created) values (?,?,?,?,?)");
-  q_meta.bind(PROGVERSION);  
-  q_meta.bind(blocksz);
-  q_meta.bind(compr);
-  q_meta.bind(name);
-  q_meta.bind(epoch());
+  Query q_meta(*this,"insert into metadata (version, blksz, compression, arrayid, created) values (?,?,?,?,?)");
+  q_meta << PROGVERSION << (ulong)blocksz << compr << name << epoch();
   q_meta.exec();
   loadbuckets(buckets);
 }
 
-void QddaDB::parsemetadata(string pr) {
-  if(blocksize) return;
-  if     (pr == "l" || pr == "list") { std::cout << "List requested" << std::endl ; return; }
-  if     (pr == "x1")    setmetadata(  8, "lz4", "XtremIO X1", "2+4+8");
-  else if(pr == "x2")    setmetadata( 16, "lz4", "XtremIO X2", "1+2+3+4+5+6+7+8+9+10+11+12+13+15+16");
-  else if(pr == "vmax1") setmetadata(128, "lz4", "VMAX v1",    "8+16+24+32.40+48+56+64+72+80+88+96+104+112+120+128");
-  else {
-    string buckets, str;
-    string name = "custom";
-    int    newblocksize = 16;
-    std::stringstream ss(pr);
-    while(ss.good()) {
-      getline(ss,str,',');
-      if(str.substr(0,5) == "name=")    name=str.substr(5);
-      if(str.substr(0,3) == "bs=")      newblocksize=atoll(str.substr(3).c_str());
-      if(str.substr(0,8) == "buckets=") buckets=str.substr(8);
-    }
-    setmetadata(newblocksize, "lz4", name, buckets);
-  }
-}
-
 void QddaDB::loadbuckets(const string& s) {
-  q_truncbuckets.execl();
-  q_loadbuckets.bind(0ul);
-  q_loadbuckets.execl();
+  Query loadbuckets(*this,"insert or replace into buckets values (?)");
+  Query truncbuckets(*this,"delete from buckets");
+  truncbuckets.exec();
+  loadbuckets.bind(0ul);
+  loadbuckets.exec();
   std::stringstream ss(s);
   string str;
   while(ss.good()) {
     getline(ss,str,'+');
-    q_loadbuckets.bind(atoll(str.c_str()));
-    q_loadbuckets.execl();
+    loadbuckets.bind(atoll(str.c_str()));
+    loadbuckets.exec();
   }
-  q_loadbuckets.bind((int)blocksize);
-  q_loadbuckets.execl();
+  loadbuckets.bind((int)blocksize());
+  loadbuckets.exec();
 }
 
 /*
@@ -599,7 +581,8 @@ group by tmpdb.staging.k
 
 // merge staging data into main table (performance optimized)
 void  QddaDB::merge(const string& name) {
-  attach("tmpdb", name);
+  attach("tmpdb",name);
+
   Query q_merge(db,"with t(hash,blocks,bytes) as ("
                    "select hash,blocks,bytes from kv union all "
                    "select hash,1,bytes from tmpdb.staging"
@@ -609,6 +592,7 @@ void  QddaDB::merge(const string& name) {
                    "select name,hostname,timestamp,blocks,bytes from tmpdb.files");
   q_merge.exec();
   q_copy.exec();
+  
   detach("tmpdb");
   update();
 }
@@ -621,7 +605,7 @@ void QddaDB::update() {
 }
       
 void QddaDB::import(const string& fn) {
-  attach("impdb", fn);
+  attach("impdb",fn);
   sql("insert or replace into main.kv \n"
       "select impdb.kv.hash \n"
       ", coalesce(main.kv.blocks,0) + impdb.kv.blocks\n"
