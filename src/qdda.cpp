@@ -15,7 +15,6 @@
 #include <fstream>
 #include <string>
 #include <cstring>
-#include <map>
 #include <vector>
 
 #include <unistd.h>
@@ -339,7 +338,7 @@ void cputest(QddaDB& db, Parameters& p) {
        << setw(11) << float(rows)*1000000/time_hash << " rows/s"
        << endl;
 
-  cout << "Compressing: " << flush;
+  cout << "Compress LZ4: " << flush;
   stopwatch.reset();
   
   for(ulong i=0;i<rows;i++) bytes[i] = compress_deflate(testdata + i*blocksize*1024,buf,blocksize*1024);
@@ -348,6 +347,17 @@ void cputest(QddaDB& db, Parameters& p) {
        << setw(10) << (float)bufsize/time_compress << " MB/s, " 
        << setw(11) << float(rows)*1000000/time_compress << " rows/s"
        << endl;
+
+  cout << "Compress DEFLATE: " << flush;
+  stopwatch.reset();
+
+  for(ulong i=0;i<rows;i++) bytes[i] = compress_lz4(testdata + i*blocksize*1024,buf,blocksize*1024);
+  time_compress = stopwatch.lap();
+  cout << setw(15) << time_compress << " usec, " 
+       << setw(10) << (float)bufsize/time_compress << " MB/s, " 
+       << setw(11) << float(rows)*1000000/time_compress << " rows/s"
+       << endl;
+
 
   // test sqlite insert performance
   cout << "DB insert:   " << flush;
@@ -501,42 +511,42 @@ int main(int argc, char** argv) {
   Options& o = opts;
   try {
     LongOptions opts;
-    opts.add("version"  ,'V', ""                , showversion,  "show version and copyright info");
-    opts.add("help"     ,'h', ""                , o.do_help,    "show usage");
-    opts.add("man"      ,'m', ""                , manpage,      "show detailed manpage");
-    opts.add("db"       ,'d', "<file>"          , o.dbname,     "database file path (default $HOME/qdda.db)");
-    opts.add("append"   ,'a', ""                , o.append,     "Append data instead of deleting database");
-    opts.add("delete"   , 0 , ""                , o.do_delete,  "Delete database");
-    opts.add("quiet"    ,'q', ""                , g_quiet,      "Don't show progress indicator or intermediate results");
-    opts.add("bandwidth",'b', "<mb/s>"          , p.bandwidth,  "Throttle bandwidth in MB/s (default 200, 0=disable)");
-    opts.add("array"    , 0 , "<id|def>"        , p.array,      "set array type or custom definition <x1|x2|vmax1|definition>");
-    opts.add("compress" , 0 , "<none|lz4|zlib>" , o.compress,   "set compression method (default=lz4)");
-    opts.add("level"    , 0 , "<level>"         , p.level,      "set compression level [TBD] (see docs)");
-    opts.add("interval" , 0 , "<n>       "      , p.interval,   "set compression sample interval (sample 1 per n blocks)");
-    opts.add("buckets"  , 0 , "<list>"          , p.buckets,    "set list of compress buckets");
-    opts.add("list"     ,'l', ""                , showlist,     "list supported array types and custom definition options");
-    opts.add("detail"   ,'x', ""                , p.detail,     "Detailed report (file info and dedupe/compression histograms)");
-    opts.add("dryrun"   ,'n', ""                , p.dryrun,     "skip staging db updates during scan");
-    opts.add("purge"    , 0 , ""                , o.do_purge,   "Reclaim unused space in database (sqlite vacuum)");
-    opts.add("import"   , 0 , "<file>"          , p.import,     "import another database (must have compatible metadata)");
-    opts.add("cputest"  , 0 , ""                , o.do_cputest, "Single thread CPU performance test");
-    opts.add("nomerge"  , 0 , ""                , p.skip,       "Skip staging data merge and reporting, keep staging database");
-    opts.add("debug"    , 0 , ""                , g_debug,      "Enable debug output");
-    opts.add("queries"  , 0 , ""                , g_query,      "Show SQLite queries and results"); // --show?
-    opts.add("tmpdir"   , 0 , "<dir>"           , p.tmpdir,     "Set $SQLITE_TMPDIR for temporary files");
-    opts.add("workers"  , 0 , "<wthreads>"      , p.workers,    "number of worker threads");
-    opts.add("readers"  , 0 , "<rthreads>"      , p.readers,    "(max) number of reader threads");
-    opts.add("findhash" , 0 , "<hash>"          , p.searchhash, "find blocks with hash=<hash> in staging db");
-    opts.add("tophash"  , 0 , "<num>"           , p.tophash,    "show top <num> hashes by refcount");
-    opts.add("squash"   , 0 , ""                , p.squash,     "set all refcounts to 1");
-    opts.add("mandump"  , 0 , ""                , o.do_mandump, "dump raw manpage to stdout");
-    opts.add("demo"     , 0 , ""                , rundemo,      "show quick demo");
+    opts.add("version"  ,'V', ""           , showversion,  "show version and copyright info");
+    opts.add("help"     ,'h', ""           , o.do_help,    "show usage");
+    opts.add("man"      ,'m', ""           , manpage,      "show detailed manpage");
+    opts.add("db"       ,'d', "<file>"     , o.dbname,     "database file path (default $HOME/qdda.db)");
+    opts.add("append"   ,'a', ""           , o.append,     "Append data instead of deleting database");
+    opts.add("delete"   , 0 , ""           , o.do_delete,  "Delete database");
+    opts.add("quiet"    ,'q', ""           , g_quiet,      "Don't show progress indicator or intermediate results");
+    opts.add("bandwidth",'b', "<mb/s>"     , p.bandwidth,  "Throttle bandwidth in MB/s (default 200, 0=disable)");
+    opts.add("array"    , 0 , "<id|def>"   , p.array,      "set array type or custom definition <x1|x2|vmax1|definition>");
+    opts.add("compress" , 0 , "<method>"   , o.compress,   "set compression method (lz4|deflate, default=lz4)");
+    opts.add("level"    , 0 , "<level>"    , p.level,      "set compression level [TBD] (see docs)");
+    opts.add("interval" , 0 , "<n>"        , p.interval,   "set compression sample interval (sample 1 per n blocks)");
+    opts.add("buckets"  , 0 , "<list>"     , p.buckets,    "set list of compress buckets");
+    opts.add("list"     ,'l', ""           , showlist,     "list supported array types and custom definition options");
+    opts.add("detail"   ,'x', ""           , p.detail,     "Detailed report (file info and dedupe/compression histograms)");
+    opts.add("dryrun"   ,'n', ""           , p.dryrun,     "skip staging db updates during scan");
+    opts.add("purge"    , 0 , ""           , o.do_purge,   "Reclaim unused space in database (sqlite vacuum)");
+    opts.add("import"   , 0 , "<file>"     , p.import,     "import another database (must have compatible metadata)");
+    opts.add("cputest"  , 0 , ""           , o.do_cputest, "Single thread CPU performance test");
+    opts.add("nomerge"  , 0 , ""           , p.skip,       "Skip staging data merge and reporting, keep staging database");
+    opts.add("debug"    , 0 , ""           , g_debug,      "Enable debug output");
+    opts.add("queries"  , 0 , ""           , g_query,      "Show SQLite queries and results"); // --show?
+    opts.add("tmpdir"   , 0 , "<dir>"      , p.tmpdir,     "Set $SQLITE_TMPDIR for temporary files");
+    opts.add("workers"  , 0 , "<wthreads>" , p.workers,    "number of worker threads");
+    opts.add("readers"  , 0 , "<rthreads>" , p.readers,    "(max) number of reader threads");
+    opts.add("findhash" , 0 , "<hash>"     , p.searchhash, "find blocks with hash=<hash> in staging db");
+    opts.add("tophash"  , 0 , "<num>"      , p.tophash,    "show top <num> hashes by refcount");
+    opts.add("squash"   , 0 , ""           , p.squash,     "set all refcounts to 1");
+    opts.add("mandump"  , 0 , ""           , o.do_mandump, "dump raw manpage to stdout");
+    opts.add("demo"     , 0 , ""           , rundemo,      "show quick demo");
 #ifdef __DEBUG
-    opts.add("update"   , 0 , ""                , o.do_update,  "update temp tables (debug only!)");
-    opts.add("buffers"  , 0 , "<buffers>"       , p.buffers,    "number of buffers (debug only!)");
-    opts.add("extest"   , 0 , ""                , errorTest,    "Test error handling");
+    opts.add("update"   , 0 , ""           , o.do_update,  "update temp tables (debug only!)");
+    opts.add("buffers"  , 0 , "<buffers>"  , p.buffers,    "number of buffers (debug only!)");
+    opts.add("extest"   , 0 , ""           , errorTest,    "Test error handling");
 #endif
-  
+
     int rc=opts.parse(argc,argv);
     if(rc) return 0; // opts.parse executed a message function
   
@@ -555,8 +565,8 @@ int main(int argc, char** argv) {
     }
 
     if     (p.array == "x1")    { p.blocksize = 8;   p.compression.setMethod("lz4",1,0);   p.buckets="2+4+8" ; }
-    else if(p.array == "x2")    { p.blocksize = 16;  p.compression.setMethod("lz4",1,0);   p.buckets="1+2+3+4+5+6+7+8+9+10+11+12+13+15+16"; }
-    else if(p.array == "vmax1") { p.blocksize = 128; p.compression.setMethod("deflate",20,0); p.buckets="8+16+24+32.40+48+56+64+72+80+88+96+104+112+120+128"; }
+    else if(p.array == "x2")    { p.blocksize = 16;  p.compression.setMethod("lz4",1,0);   p.buckets="1,2,3,4,5,6,7,8,9,10,11,12,13,15,16"; }
+    else if(p.array == "vmax1") { p.blocksize = 128; p.compression.setMethod("deflate",20,0); p.buckets="8,16,24,32.40,48,56,64,72,80,88,96,104,112,120,128"; }
     
     if(!o.compress.empty()) p.compression.setMethod(o.compress);
     if(p.interval) p.compression.setInterval(p.interval);

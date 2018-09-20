@@ -564,7 +564,7 @@ void QddaDB::loadbuckets(const string& s) {
   std::stringstream ss(s);
   string str;
   while(ss.good()) {
-    getline(ss,str,'+');
+    getline(ss,str,',');
     loadbuckets.bind(atoll(str.c_str()));
     loadbuckets.exec();
   }

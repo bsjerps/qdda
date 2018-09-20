@@ -35,10 +35,11 @@ S * Revision history:
  * 2.0.6 - Exception handling
  * 2.0.7 - Bugfix for EOF while reading
  * 2.0.8 - Reduced max reader threads from 32 to 8
+ * 2.1.0 - Added deflate (VMAX), cleaned code, compression sampling
  * ---------------------------------------------------------------------------
  ******************************************************************************/
  
-const char* manpage_head = R"(.TH qdda 1 "2018-03-24" "QDDA" "QDDA User Manual"
+const char* manpage_head = R"(.TH qdda 1 "2018-09-20" "QDDA" "QDDA User Manual"
 .SH NAME
 qdda \- the quick & dirty dedupe analyzer
 .SH SYNOPSIS
@@ -48,8 +49,8 @@ qdda \- the quick & dirty dedupe analyzer
 .B qdda
 checks files, data streams or block devices for duplicate blocks to estimate deduplication
 efficiency on dedupe capable storage systems, using key-value stores in SQLite,
-MD5 hashing and LZ4 compression.  It also estimates compression ratios for all-flash arrays
-XtremIO X1 and X2 as well as VMAX AFA (experimental).
+MD5 hashing and LZ4 or DEFLATE compression. It also estimates compression ratios for all-flash arrays
+XtremIO X1 and X2 as well as VMAX All-flash / PowerMAX.
 .P
 
 .SH IMPORTANT NOTES
@@ -109,15 +110,15 @@ With the X2, the internal blocksize was increased to 16KiB and many more (15) co
 1K increments, where 15K is missing because in XtremIO X2 architecture it would allocate the same capacity as 16K uncompressed. 
 The larger block size and more variations in buckets makes XtremIO compression much more effective. 
 There is still a slight difference in compression ratio due to LZ4 versus the native XtremIO algorithm.
-.IP VMAX\ All-Flash\ (--array=vmax1)
-VMAX data reduction estimates are currently 
-.B EXPERIMENTAL.
-.br
-VMAX compresses data using 128K chunks which get compressed in bucket sizes from 8K up to 128K with 8K increments. Not all bucket sizes are
-available at initial configuration and VMAX changes the compression layout dynamically and also avoids compression
-for up to 20% of all data, based on workload and data profile. This makes it hard for qdda to give reasonable estimates which is why
-it is marked as EXPERIMENTAL for now. The output of qdda shows the results at most ideal circumstances (all data gets deduped and
-compressed always). Future versions may improve on accuracy.
+.IP VMAX\ (--array=vmax1)
+(All-Flash / PowerMAX)
+VMAX compresses/dedupes data using 128K chunks which get compressed in bucket sizes from 8K up to 128K with 8K increments.
+The compression is initially performed by splitting 128K into 4 32K chunks but if the data is cold for a while it can get
+re-compressed on the full 128K block. Not all bucket sizes are available at initial configuration and 
+VMAX changes the compression layout dynamically. 
+It also can delay or avoid compression at all for up to 20% of all data to avoid overhead for hot data blocks.
+As the data reduction rate is not immediately known or deterministic, qdda assumes the final state scenario where
+128K blocks get fully compressed and deduped. 
 .IP custom\ (--array=<custom\ definition>)
 Specify a string with array=name=<name>,bs=<blocksize_kb>,buckets=<size1+size2....>
 .br
@@ -127,6 +128,13 @@ The compress and hash algorithms are slightly different from these actual arrays
 and the results are a (close) approximation of the real array data reduction.
 Currently qdda only uses LZ4 (default) compression.
 .P
+.SH COMPRESSION
+Currently qdda supports LZ4 as well as ZLIB (DEFLATE) compression.
+.br
+LZ4 is a very fast, lightweight compression algorithm with reasonable compression ratios. My i5-4440@3.1GHz can
+compress roughly at 500MB/s per core.
+DEFLATE offers higher compression ratios but at the expense of much heavier CPU load. The same i5-4440 can do
+roughly 55MB/s per core.
 .SH ERRORS
 .B qdda
 has basic error handling. Most errors result in simply aborting with an error message and return code.

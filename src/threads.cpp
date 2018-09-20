@@ -14,7 +14,6 @@
 #include <thread>
 #include <string>
 #include <mutex>
-#include <map>
 
 #include <unistd.h>
 #include <sys/types.h>
