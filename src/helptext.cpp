@@ -115,10 +115,11 @@ There is still a slight difference in compression ratio due to LZ4 versus the na
 VMAX compresses/dedupes data using 128K chunks which get compressed in bucket sizes from 8K up to 128K with 8K increments.
 The compression is initially performed by splitting 128K into 4 32K chunks but if the data is cold for a while it can get
 re-compressed on the full 128K block. Not all bucket sizes are available at initial configuration and 
-VMAX changes the compression layout dynamically. 
+VMAX changes the compression layout dynamically.
 It also can delay or avoid compression at all for up to 20% of all data to avoid overhead for hot data blocks.
 As the data reduction rate is not immediately known or deterministic, qdda assumes the final state scenario where
-128K blocks get fully compressed and deduped. 
+128K blocks get fully compressed (using DEFLATE) and deduped
+so the qdda result reflects the optimal end result for idle data.
 .IP custom\ (--array=<custom\ definition>)
 Specify a string with array=name=<name>,bs=<blocksize_kb>,buckets=<size1+size2....>
 .br
@@ -135,6 +136,8 @@ LZ4 is a very fast, lightweight compression algorithm with reasonable compressio
 compress roughly at 500MB/s per core.
 DEFLATE offers higher compression ratios but at the expense of much heavier CPU load. The same i5-4440 can do
 roughly 55MB/s per core.
+.br
+Both compression algorithms use their default compression level.
 .SH ERRORS
 .B qdda
 has basic error handling. Most errors result in simply aborting with an error message and return code.

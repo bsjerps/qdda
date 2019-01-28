@@ -174,14 +174,14 @@ u_int compress_lz4(const char * src, char* buf, const int size) {
   return result;
 }
 
-u_int compress_deflate(const char * src, char* buf, const int size) {
+u_int compress_deflate(const char* src, char* buf, const int size) {
   int ret;
   u_int compressed;
   z_stream strm;
   strm.zalloc = Z_NULL;
   strm.zfree  = Z_NULL;
   strm.opaque = Z_NULL;
-  ret = deflateInit(&strm, 1); // level
+  ret = deflateInit(&strm, 6); // level
   strm.avail_in  = size;
   strm.avail_out = size;
   strm.next_in   = (unsigned char *)src;
@@ -191,7 +191,7 @@ u_int compress_deflate(const char * src, char* buf, const int size) {
   (void)deflateEnd(&strm);
   return compressed;
 }
-  
+
 /*******************************************************************************
  * Formatting & printing
  ******************************************************************************/
@@ -246,7 +246,7 @@ void progress(ulong blocks,ulong blocksize, ulong bytes, const char * msg) {
 
 
 void import(QddaDB& db, const string& filename) {
-  if(!fileIsSqlite3(filename)) return;
+  if(!Database::isValid(filename.c_str())) return;
   QddaDB idb(filename);
   ulong blocksize = db.blocksize();
   if(blocksize != idb.blocksize()) throw ERROR("Incompatible blocksize on") << filename;
@@ -257,7 +257,7 @@ void import(QddaDB& db, const string& filename) {
 
 // Merge staging data into kv table, track & display time to merge
 void merge(QddaDB& db, Parameters& parameters) {
-  if(!fileIsSqlite3(parameters.stagingname)) return;
+  if(!Database::isValid(parameters.stagingname.c_str())) return;
   
   StagingDB sdb(parameters.stagingname);
 
@@ -472,9 +472,8 @@ void errorTest() {
 
 const char* Compression::namelist[8] = { "none", "lz4", "deflate"};
 
-void Compression::setMethod(const std::string& in, int interval, int level) {
+void Compression::setMethod(const std::string& in, int interval) {
   setInterval(interval);
-  //setLevel(level);
   setMethod(in);
 }
   
@@ -521,14 +520,13 @@ int main(int argc, char** argv) {
     opts.add("bandwidth",'b', "<mb/s>"     , p.bandwidth,  "Throttle bandwidth in MB/s (default 200, 0=disable)");
     opts.add("array"    , 0 , "<id|def>"   , p.array,      "set array type or custom definition <x1|x2|vmax1|definition>");
     opts.add("compress" , 0 , "<method>"   , o.compress,   "set compression method (lz4|deflate, default=lz4)");
-    opts.add("level"    , 0 , "<level>"    , p.level,      "set compression level [TBD] (see docs)");
-    opts.add("interval" , 0 , "<n>"        , p.interval,   "set compression sample interval (sample 1 per n blocks)");
+    opts.add("interval" , 0 , "<n>"        , o.interval,   "set compression sample interval (sample 1 per n blocks)");
     opts.add("buckets"  , 0 , "<list>"     , p.buckets,    "set list of compress buckets");
     opts.add("list"     ,'l', ""           , showlist,     "list supported array types and custom definition options");
     opts.add("detail"   ,'x', ""           , p.detail,     "Detailed report (file info and dedupe/compression histograms)");
     opts.add("dryrun"   ,'n', ""           , p.dryrun,     "skip staging db updates during scan");
     opts.add("purge"    , 0 , ""           , o.do_purge,   "Reclaim unused space in database (sqlite vacuum)");
-    opts.add("import"   , 0 , "<file>"     , p.import,     "import another database (must have compatible metadata)");
+    opts.add("import"   , 0 , "<file>"     , o.import,     "import another database (must have compatible metadata)");
     opts.add("cputest"  , 0 , ""           , o.do_cputest, "Single thread CPU performance test");
     opts.add("nomerge"  , 0 , ""           , p.skip,       "Skip staging data merge and reporting, keep staging database");
     opts.add("debug"    , 0 , ""           , g_debug,      "Enable debug output");
@@ -564,12 +562,12 @@ int main(int argc, char** argv) {
       Database::deletedb(o.dbname); return 0;
     }
 
-    if     (p.array == "x1")    { p.blocksize = 8;   p.compression.setMethod("lz4",1,0);   p.buckets="2+4+8" ; }
-    else if(p.array == "x2")    { p.blocksize = 16;  p.compression.setMethod("lz4",1,0);   p.buckets="1,2,3,4,5,6,7,8,9,10,11,12,13,15,16"; }
-    else if(p.array == "vmax1") { p.blocksize = 128; p.compression.setMethod("deflate",20,0); p.buckets="8,16,24,32.40,48,56,64,72,80,88,96,104,112,120,128"; }
+    if     (p.array == "x1")    { p.blocksize = 8;   p.compression.setMethod("lz4",1);   p.buckets="2+4+8" ; }
+    else if(p.array == "x2")    { p.blocksize = 16;  p.compression.setMethod("lz4",1);   p.buckets="1,2,3,4,5,6,7,8,9,10,11,12,13,15,16"; }
+    else if(p.array == "vmax1") { p.blocksize = 128; p.compression.setMethod("deflate",20); p.buckets="8,16,24,32.40,48,56,64,72,80,88,96,104,112,120,128"; }
     
     if(!o.compress.empty()) p.compression.setMethod(o.compress);
-    if(p.interval) p.compression.setInterval(p.interval);
+    if(o.interval) p.compression.setInterval(o.interval);
 
   }
   catch (Fatal& e) { e.print(); return 10; }
@@ -605,7 +603,7 @@ int main(int argc, char** argv) {
     if(g_abort) return 1;
 
     if(o.do_purge)             { db.vacuum();           }
-    else if(!p.import.empty()) { import(db,p.import);   }
+    else if(!o.import.empty()) { import(db,o.import);   }
     else if(o.do_cputest)      { cputest(db,p) ;        }
     else if(o.do_update)       { update(db) ;           }
     else if(p.searchhash!=0)   { findhash(p);           }

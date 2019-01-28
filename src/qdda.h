@@ -43,21 +43,19 @@ void  progress(ulong blocks,ulong blocksize, ulong bytes, const char * msg = NUL
 
 class Compression {
 public:
-  explicit Compression()              { method=none; level=0; }
+  explicit Compression()              { method=none; }
   enum CompressMethod { none, lz4, deflate };
   void setMethod(const std::string&);
-  void setMethod(const std::string&, int, int);
+  void setMethod(const std::string&, int);
   void setInterval(int);
   int  getMethod()                    { return method; };
-  int  getLevel()                     { return level; }
   int  getInterval()                  { return interval; }
   operator const char*()              { return namelist[method];}
   void print(std::ostream& os)        { os << namelist[method] ; }
 private:
   static const char* namelist[8];
   CompressMethod method;
-  int interval;
-  int level;
+  int interval;    // sample interval
 };
 
 class FileData {
@@ -68,7 +66,6 @@ public:
   ulong          limit_mb;
   int            repeat;
   int            ratio;
-private:
 };
 
 // Command line options
@@ -81,7 +78,9 @@ struct Options {
   bool do_demo;
   bool do_update;
   bool append;
+  int  interval;
   std::string dbname,compress;
+  std::string import;
 };
 
 // Parameter set to pass between functions
@@ -90,15 +89,13 @@ struct Parameters {
   std::string stagingname;
   std::string tmpdir;
   std::string array;
-  std::string import;
 
   std::string buckets;
   Compression compression;
 
   ulong searchhash;
   ulong blocksize;
-  int  level;      // compression level
-  int  interval;   // sample interval
+
   int  bandwidth;  // default bandwidth throttle (MB/s)
   int  workers;    // number of workers (threads)
   int  readers;    // max number of readers

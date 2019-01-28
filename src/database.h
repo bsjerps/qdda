@@ -13,13 +13,6 @@
 #include <limits.h>
 
 /*******************************************************************************
- * functions
- ******************************************************************************/
-
-int fileIsSqlite3(const char * fn);          // test if file is SQLite3 format
-int fileIsSqlite3(const std::string& s);     // test if file is SQLite3 format
-
-/*******************************************************************************
  * forward decs
  ******************************************************************************/
 
@@ -57,7 +50,6 @@ public:
   Query& operator<< (uint32_t);
   Query& operator<< (const char *);
   Query& operator<< (const std::string&);
-  
 private:
   void init(sqlite3* db, const char*); // shared constructor due to C++03
   Query(const Query&);              // disable copy i.e. auto = (Query)
@@ -78,7 +70,8 @@ public:
   static int   createdb(const std::string& fn, const char* schema);
   static int   deletedb(const std::string& fn);
   static int   exists(const std::string& fn);
-  void         settmpdir (const std::string& d) { tmpdir = d; };
+  static int   isValid(const char*);
+  void         settmpdir(const std::string& d) { tmpdir = d; };
   int          attach(const std::string& s, const std::string& p);
   int          detach(const std::string& s);
   int          close();
@@ -103,17 +96,14 @@ private:
 class StagingDB: public Database {
 public:
   explicit StagingDB(const std::string& fn);
- ~StagingDB(); 
   static void createdb(const std::string& fn, ulong blocksize);
   int         fillrandom(ulong rows, int blocksize, int dup);
   int         fillzero(ulong rows);
   void        insertdata(ulong, ulong);
   int         insertmeta(const std::string& name, ulong blocks, ulong bytes);
-  
   ulong blocksize();
   ulong getrows();
-  void setblocksize(ulong);
-  
+  void  setblocksize(ulong);
   Query q_insert;
 };
 

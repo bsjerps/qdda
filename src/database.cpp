@@ -43,31 +43,6 @@ using std::string;
 ******************************************************************************/
 
 /*******************************************************************************
- * Generic functions
- ******************************************************************************/
-
-
-// test if specified file is SQLite3 file
-int fileIsSqlite3(const char * fn) {
-  const char * magic = "SQLite format 3";
-  char buf[32];
-  std::ifstream f(fn);
-  if (!f.good()) return 0;           // can't open file - nonexistent?
-  f.seekg (0, f.beg);                // start at begin of file
-  f.read (buf,strlen(magic));        // read the magic string
-  int bytes = f.gcount();
-  if(!bytes) return 1;
-  buf[strlen(magic)]=0;              // force terminate with \0
-  if(strcmp(magic,buf)==0) return 1; // compare with magic
-  return 0;
-}
-
-// wrapper for calls with string instead of char*
-int fileExists(const string& fn)        { return fileExists(fn.c_str());}
-int fileIsSqlite3(const string& fn)     { return fileIsSqlite3(fn.c_str());}
-int fileDeleteSqlite3(const string& fn) { return fileDeleteSqlite3(fn.c_str()); }
-
-/*******************************************************************************
  * Query class functions
  ******************************************************************************/
 
@@ -260,6 +235,21 @@ Database::~Database()   { close();  }
 void Database::begin()  { sql("begin"); }
 void Database::end()    { sql("end"); }
 
+// test if specified file is SQLite3 file
+int Database::isValid(const char * fn) {
+  const char * magic = "SQLite format 3";
+  char buf[32];
+  std::ifstream f(fn);
+  if (!f.good()) return 0;           // can't open file - nonexistent?
+  f.seekg (0, f.beg);                // start at begin of file
+  f.read (buf,strlen(magic));        // read the magic string
+  int bytes = f.gcount();
+  if(!bytes) return 1;
+  buf[strlen(magic)]=0;              // force terminate with \0
+  if(strcmp(magic,buf)==0) return 1; // compare with magic
+  return 0;
+}
+
 int Database::attach(const string& schema, const string& fname) {
   Query q(db, "attach database ? as ?");
   q << fname << schema;
@@ -372,7 +362,7 @@ CREATE VIEW IF NOT EXISTS offsets as with m(b) as (select blksz from metadata) s
 }
 
 StagingDB::StagingDB(const string& fn): Database(fn),
-  q_insert      (*this,"insert into staging(hash,bytes) values (?,?)")
+  q_insert (*this,"insert into staging(hash,bytes) values (?,?)")
 {
   sql("PRAGMA schema_version");      // trigger error if not open
   sql("PRAGMA journal_mode = off");  // speed up, don't care about consistency
@@ -395,8 +385,6 @@ void StagingDB::setblocksize(ulong p) {
   q << p;
   q.exec();
 }
-
-StagingDB::~StagingDB()  { }
 
 // insert hash, compressed bytes into staging
 void StagingDB::insertdata(ulong hash, ulong bytes) {
