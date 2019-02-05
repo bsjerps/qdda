@@ -15,13 +15,8 @@
 #include <fstream>
 #include <string>
 #include <cstring>
-#include <vector>
 
-#include <unistd.h>
-#include <pthread.h>
-#include <stdlib.h>    // srand, rand
 #include <signal.h>
-#include <sys/stat.h>  // stat
 
 #include "error.h"
 #include "lz4/lz4.h"
@@ -34,7 +29,14 @@ extern "C" {
 #include "md5/md5.h"
 }
 
-using namespace std;
+using std::string;
+using std::stringstream;
+using std::left;
+using std::setw;
+using std::setprecision;
+using std::endl;
+using std::cout;
+using std::flush;
 
 /*******************************************************************************
  * global parameters - modify at own discretion
@@ -46,7 +48,6 @@ const char* PROGVERSION = TOSTRING(VERSION) RELEASE;
 const char* PROGVERSION = "0.0.1";
 #endif
 
-const char* kdefault_array = "x2";
 const int kdefault_bandwidth = 200;
 const int kmax_reader_threads = 8;
 
@@ -54,14 +55,18 @@ const int kmax_reader_threads = 8;
  * Initialization - globals
  ******************************************************************************/
 
-bool g_debug = false; // global debug flag
-bool g_query = false; // global query flag
-bool g_quiet = false; // global quiet flag
+bool g_debug = false;        // global debug flag
+bool g_query = false;        // global query flag
+bool g_quiet = false;        // global quiet flag
 extern sig_atomic_t g_abort; // global abort flag
 
-ulong starttime = epoch(); // start time of program
+uint64 starttime = epoch();  // start time of program
 
-ofstream c_debug; // Debug stream
+std::ofstream c_debug; // Debug stream
+
+/*******************************************************************************
+ * Filedata class - info about files/streams to be scanned
+ ******************************************************************************/
 
 FileData::FileData(const string& file) {
   ratio=0; limit_mb=0;
@@ -82,13 +87,13 @@ FileData::FileData(const string& file) {
 
   if(access(filename.c_str(), F_OK | R_OK)) {
     switch (errno) {
-      case EACCES: throw ERROR("Access denied: ") << file << ", try 'sudo setfacl -m u:" << getenv ("USER") << ":r " << filename << "'";
-      case ENOENT: throw ERROR("File does not exist: ") << file;
+      case EACCES: throw ERROR("Access denied: ") << filename << ", try 'sudo setfacl -m u:" << getenv ("USER") << ":r " << filename << "'";
+      case ENOENT: throw ERROR("File does not exist: ") << filename;
     }
     throw ERROR("File error: ") << file;
   }
 
-  ifs = new ifstream;
+  ifs = new std::ifstream;
   ifs->exceptions ( std::ifstream::failbit );
 
   c_debug << "Opening: " << file << endl;
@@ -118,9 +123,11 @@ const char * title_info = " - The Quick & Dirty Dedupe Analyzer\n"
 
 extern const char* manpage_head;
 extern const char* manpage_body;
+extern const char* bash_complete;
 
-void showtitle()   { if(!g_quiet) cout << "qdda " << PROGVERSION << title_info ; }
-void showversion() { showtitle(); std::cout << version_info << std::endl; }
+void showtitle()    { if(!g_quiet) cout << "qdda " << PROGVERSION << title_info ; }
+void showversion()  { showtitle(); std::cout << version_info << std::endl; }
+void showcomplete() { std::cout << bash_complete; }
 
 /*******************************************************************************
  * Various
@@ -128,6 +135,8 @@ void showversion() { showtitle(); std::cout << version_info << std::endl; }
 
 /*******************************************************************************
  * Notes on hash algorithm
+ * MD5 is selected for simplicity, high performance and good hash distribution
+ * 
  * SQLite integer (also used for primary key on kv table) has max 8 bytes and is
  * signed integer. MAX value is 9 223 372 036 854 775 808. The max value of
  * unsigned long (64 bit) is 18446744073709551615UL which result in negative
@@ -137,28 +146,36 @@ void showversion() { showtitle(); std::cout << version_info << std::endl; }
  * function - see https://en.wikipedia.org/wiki/Birthday_problem#Probability_table
  * which shows 50% chance of collisions with 77000 rows on 32bit hash which equals
  * 630MiB using 8K blocksize. Problem gets worse when increasing the dataset.
- * 7 bytes (56 bits) is a tradeoff between DB space consumed, performance and
- * accuracy and has a 50% chance of collision with 316M rows (4832GB@16K)
+ * 7.5 bytes (60 bits) is a tradeoff between DB space consumed, performance and
+ * accuracy and has a 50% chance of collision with 316M rows (19290 GB@16K)
  * which is fine for datasets up to many terabytes.
  * A 64-bit hash would get roughly 1 collision every 77TB@16K.
+ * 
+ * Bits           Hash space       Rows  Datasize@16K (GiB)
+ * 56      72057594037927900  316058597             4822.67
+ * 60    1152921504606850000 1264234386            19290.69
+ * 64   18446744073709600000 5056937541            77162.74
+ * 
+ * Formula: rows = 0.5 * sqrt(0.25 + 2xln(2) * hash space)
+ * rows is the amount of rows to have 50% chance of a hash collision
  ******************************************************************************/
 
-// returns the least significant 7 bytes of the md5 hash (16 bytes) as unsigned long
+// returns the least significant 60 bits of the md5 hash (16 bytes) as 64-bit unsigned int
 uint64_t hash_md5(const char * src, char* zerobuf, const int size) {
   unsigned char digest[16];
-  memset(zerobuf,0,size);      // initialize buf with zeroes
-  if(memcmp (src,zerobuf,size)==0) return 0;         // return 0 for zero block
+  memset(zerobuf,0,size);                     // initialize buf with zeroes
+  if(memcmp (src,zerobuf,size)==0) return 0;  // return 0 for zero block
   MD5_CTX ctx;  
   MD5_Init(&ctx);
   MD5_Update(&ctx, src, size);
   MD5_Final(digest, &ctx);
-  return                                // ignore chars 0-8
+  return                                   // ignore chars 0-8
     ((uint64_t)(digest[8]&0X0F)  << 56) +  // pick 4 bits from byte 7
     ((uint64_t)digest[9]  << 48) +         // all bits from byte 6 to 0
-    ((uint64_t)digest[10] << 40) +         // convert char* to ulong but keeping
+    ((uint64_t)digest[10] << 40) +         // convert char* to uint64 but keeping
     ((uint64_t)digest[11] << 32) +         // the right order, only use lower 6 bytes (char 10-15)
     ((uint64_t)digest[12] << 24) +         // SQLite integer is 8 byte signed so we need to stay within
-    ((uint64_t)digest[13] << 16) +         // 8 bytes and unsigned. 6 bytes is best compromise
+    ((uint64_t)digest[13] << 16) +         // 8 bytes and unsigned. 60 bits is best compromise
     ((uint64_t)digest[14] << 8 ) +
     ((uint64_t)digest[15]);
 }
@@ -200,24 +217,24 @@ u_int compress_deflate(const char* src, char* buf, const int size) {
 void showprogress(const std::string& str) {
   if(g_quiet) return;
   static unsigned int l = 0;
-  l = str.length() > l ? str.length() : l;     // track largest string length between calls
-  if(str.length() == 0) {                      // clear line if string empty
-    for(u_int i=0;i<l;i++) cout << ' ';   // overwrite old line with spaces
-    for(u_int i=0;i<l;i++) cout << '\b';  // carriage return (no newline), \b = backspace
+  l = str.length() > l ? str.length() : l; // track largest string length between calls
+  if(str.length() == 0) {                  // clear line if string empty
+    for(u_int i=0;i<l;i++) cout << ' ';    // overwrite old line with spaces
+    for(u_int i=0;i<l;i++) cout << '\b';   // carriage return (no newline), \b = backspace
   } else {
     cout << str;
     for(u_int i=0;i<str.length();i++) cout << '\b'; // returns the cursor to original offset
-    cout << std::flush;                             // print string ; carriage return
+    cout << std::flush;
   }
 }
 
 // Show progress information, updated every N blocks. 
-void progress(ulong blocks,ulong blocksize, ulong bytes, const char * msg) {
+void progress(int64 blocks,int64 blocksize, size_t bytes, const char * msg) {
   static Stopwatch stopwatch;     // time of start processing file
   static Stopwatch prev;          // time of previous call
   stopwatch.lap();                // get current time interval
   static int   filenum   = 0;     // previous file num (tells us when new file process starts)
-  static ulong prevbytes = 0;     // keep track of previous byte count
+  static int64 prevbytes = 0;     // keep track of previous byte count
   if(filenum==0) {                // reset stats before processing new file
     stopwatch.reset();
     prev=stopwatch;
@@ -226,8 +243,8 @@ void progress(ulong blocks,ulong blocksize, ulong bytes, const char * msg) {
   }
   auto avgsvctm = stopwatch;                                   // service time of xx bytes since start of file
   auto cursvctm = stopwatch - prev;                            // service time of xx bytes since previous call
-  auto avgbw = safeDiv_ulong(bytes,avgsvctm);                  // bytes per second since start of file
-  auto curbw = safeDiv_ulong((bytes-prevbytes),cursvctm);      // bytes per second since previous call
+  auto avgbw = safeDiv_int64(bytes,avgsvctm);                  // bytes per second since start of file
+  auto curbw = safeDiv_int64((bytes-prevbytes),cursvctm);      // bytes per second since previous call
   stringstream ss;                                             // generate a string with the progress message
   ss << blocks        << " "                                   // blocks scanned
      << blocksize     << "k blocks ("                          // blocksize
@@ -244,13 +261,12 @@ void progress(ulong blocks,ulong blocksize, ulong bytes, const char * msg) {
  * Functions
  ******************************************************************************/
 
-
+// Import another database
 void import(QddaDB& db, const string& filename) {
   if(!Database::isValid(filename.c_str())) return;
   QddaDB idb(filename);
-  ulong blocksize = db.blocksize();
-  if(blocksize != idb.blocksize()) throw ERROR("Incompatible blocksize on") << filename;
-
+  int64 blocksize = db.getblocksize();
+  if(blocksize != idb.getblocksize()) throw ERROR("Incompatible blocksize on") << filename;
   cout << "Adding " << idb.getrows() << " blocks from " << filename << " to " << db.getrows() << " existing blocks" << endl;
   db.import(filename);
 }
@@ -261,14 +277,13 @@ void merge(QddaDB& db, Parameters& parameters) {
   
   StagingDB sdb(parameters.stagingname);
 
-  //stringstream ss2;
-  ulong blocksize    = db.blocksize();
-  ulong dbrows       = db.getrows();
-  ulong tmprows      = sdb.getrows();
-  ulong mib_staging  = tmprows*blocksize/1024;
-  ulong mib_database = dbrows*blocksize/1024;
-  ulong fsize1       = db.filesize();
-  ulong fsize2       = sdb.filesize();
+  sql_int blocksize    = db.getblocksize();
+  sql_int dbrows       = db.getrows();
+  sql_int tmprows      = sdb.getrows();
+  sql_int mib_staging  = tmprows*blocksize/1024;
+  sql_int mib_database = dbrows*blocksize/1024;
+  sql_int fsize1       = db.filesize();
+  sql_int fsize2       = sdb.filesize();
 
   if(blocksize != sdb.blocksize()) throw ERROR("Incompatible blocksize on stagingdb");
   
@@ -283,16 +298,16 @@ void merge(QddaDB& db, Parameters& parameters) {
       << mib_database << " MiB)" << flush;
 
     stopwatch.reset();
-    ulong index_rps = tmprows*1000000/stopwatch;
-    ulong index_mbps = mib_staging*1000000/stopwatch;
+    uint64 index_rps = tmprows*1000000/stopwatch;
+    uint64 index_mbps = mib_staging*1000000/stopwatch;
     
     stopwatch.reset();
     db.merge(parameters.stagingname);
     stopwatch.lap();
     
     auto time_merge = stopwatch;
-    ulong merge_rps = (tmprows+dbrows)*1000000/time_merge;
-    ulong merge_mbps = (mib_staging+mib_database)*1000000/time_merge;
+    uint64 merge_rps = (tmprows+dbrows)*1000000/time_merge;
+    uint64 merge_mbps = (mib_staging+mib_database)*1000000/time_merge;
     if(!g_quiet) cout << " in "
       << stopwatch.seconds() << " sec (" 
       << merge_rps << " blocks/s, " 
@@ -303,73 +318,72 @@ void merge(QddaDB& db, Parameters& parameters) {
 
 // test hashing, compression and insert performance
 void cputest(QddaDB& db, Parameters& p) {
- 
-  StagingDB::createdb(p.stagingname,db.blocksize());
+
+  StagingDB::createdb(p.stagingname,db.getblocksize());
   StagingDB stagingdb(p.stagingname);
   
-  const ulong mib       = 1024; // size of test set
-  const ulong blocksize = db.blocksize();
+  const int64 mib       = 1024; // size of test set
+  const int64 blocksize = db.getblocksize();
 
-  const ulong rows      = mib * 1024 / blocksize;
-  const ulong bufsize   = mib * 1024 * 1024;
+  const int64 rows      = mib * 1024 / blocksize;
+  const int64 bufsize   = mib * 1024 * 1024;
   char*       testdata  = new char[bufsize];
-  ulong*      hashes    = new ulong[rows];
-  ulong*      bytes     = new ulong[rows];
-  ulong time_hash, time_compress, time_insert;
+  uint64*     hashes    = new uint64[rows];
+  int64*      bytes     = new int64[rows];
+  int64 time_hash, time_compress, time_insert;
   char buf[blocksize*1024];
   
   Stopwatch   stopwatch;
+  
+  cout << std::fixed << setprecision(2) << "*** Synthetic performance test, 1 thread ***" << endl;
 
-  cout << fixed << setprecision(2) << "*** Synthetic performance test, 1 thread ***" << endl;
-
-  cout << "Initializing:" << flush; 
+  cout << "Initializing:" << flush;
   srand(1);
   memset(testdata,0,bufsize);
-  for(ulong i=0;i<bufsize;i++) testdata[i] = (char)rand() % 8; // fill test buffer with random(ish) but compressible data
+  for(int64 i=0;i<bufsize;i++) testdata[i] = (char)rand() % 8; // fill test buffer with random(ish) but compressible data
   cout << setw(15) << rows << " blocks, " << blocksize << "k (" << bufsize/1048576 << " MiB)" << endl;
 
-  cout << "Hashing:     " << flush;
+  cout << left << setw(18) << "Hashing:" << flush;
   stopwatch.reset();
-  for(ulong i=0;i<rows;i++) hashes[i] = hash_md5(testdata + i*blocksize*1024,buf,blocksize*1024);
+  for(int64 i=0;i<rows;i++) hashes[i] = hash_md5(testdata + i*blocksize*1024,buf,blocksize*1024);
   time_hash = stopwatch.lap();
   
   cout << setw(15) << time_hash     << " usec, " 
        << setw(10) << (float)bufsize/time_hash << " MB/s, " 
-       << setw(11) << float(rows)*1000000/time_hash << " rows/s"
+       << setw(11) << (float)rows*1000000/time_hash << " rows/s"
        << endl;
 
-  cout << "Compress LZ4: " << flush;
+  cout << left << setw(18) << "Compress DEFLATE:" << flush;
   stopwatch.reset();
   
-  for(ulong i=0;i<rows;i++) bytes[i] = compress_deflate(testdata + i*blocksize*1024,buf,blocksize*1024);
+  for(int64 i=0;i<rows;i++) bytes[i] = compress_deflate(testdata + i*blocksize*1024,buf,blocksize*1024);
   time_compress = stopwatch.lap();
   cout << setw(15) << time_compress << " usec, " 
        << setw(10) << (float)bufsize/time_compress << " MB/s, " 
-       << setw(11) << float(rows)*1000000/time_compress << " rows/s"
+       << setw(11) << (float)rows*1000000/time_compress << " rows/s"
        << endl;
 
-  cout << "Compress DEFLATE: " << flush;
+  cout<< left << setw(18) << "Compress LZ4:" << flush;
   stopwatch.reset();
 
-  for(ulong i=0;i<rows;i++) bytes[i] = compress_lz4(testdata + i*blocksize*1024,buf,blocksize*1024);
+  for(int64 i=0;i<rows;i++) bytes[i] = compress_lz4(testdata + i*blocksize*1024,buf,blocksize*1024);
   time_compress = stopwatch.lap();
   cout << setw(15) << time_compress << " usec, " 
        << setw(10) << (float)bufsize/time_compress << " MB/s, " 
-       << setw(11) << float(rows)*1000000/time_compress << " rows/s"
+       << setw(11) << (float)rows*1000000/time_compress << " rows/s"
        << endl;
 
 
-  // test sqlite insert performance
-  cout << "DB insert:   " << flush;
+  cout << left << setw(18) << "DB insert:" << flush;
   stopwatch.reset();
 
   stagingdb.begin();
-  for(ulong i=0;i<rows;i++) stagingdb.insertdata(hashes[i],bytes[i]);
+  for(int64 i=0;i<rows;i++) stagingdb.insertdata(hashes[i],bytes[i]);
   stagingdb.end();
   time_insert = stopwatch.lap();
   cout << setw(15) << time_insert << " usec, "
        << setw(10) << (float)bufsize/time_insert   << " MB/s, "
-       << setw(11) << float(rows)*1000000/time_insert << " rows/s"
+       << setw(11) << (float)rows*1000000/time_insert << " rows/s"
        << endl;
 
   delete[] testdata;
@@ -378,7 +392,7 @@ void cputest(QddaDB& db, Parameters& p) {
   Database::deletedb(p.stagingname);
 }
 
-
+// Run man command with generated man page text
 void manpage() {
   string cmd = "(";
   cmd += whoAmI();
@@ -386,57 +400,56 @@ void manpage() {
   if(!system(cmd.c_str())) { };
 }
 
+// Return default database path
 const string& defaultDbName() {
   static string dbname;
   dbname = homeDir() + "/qdda.db";
   return dbname;
 }
 
+// show short help
 void showhelp(LongOptions& lo) {
   std::cout << "\nUsage: qdda <options> [FILE]...\nOptions:" << "\n";
   lo.printhelp(cout);
   std::cout << "\nMore info: qdda --man \nor the project homepage: http://outrun.nl/wiki/qdda\n\n";
 }
 
-void showlist() {
-  showtitle();
-  std::cout << "\narray options:\n\n"
-    << "  --array x1    - XtremIO X1\n"
-    << "  --array x2    - XtremIO X2\n"
-    << "  --array vmax1 - VMAX All Flash (experimental)\n"
-    << "  --array name=<name>,bs=<blocksize>,buckets=<bucketlist>\n\n"
-    << "  blocksize in kb between 1 and 128, buckets in kb separated by +\n"
-    << "  example: --array name=foo,bs=32,buckets=8+16+24+32\n"
-    ;
-}
-
+// dump manpage to stdout
 void mandump(LongOptions& lo) {
   cout << manpage_head;
   lo.printman(cout);
   cout << manpage_body;
 }
 
+// call self with demo parameters
 void rundemo() {
   string cmd = "";
   cmd += whoAmI();
   cmd += " -d /tmp/demo compress:128,4 compress:256,2 compress:512 zero:512";
+  cout << "Running: " << cmd << endl << endl;
   if(!system(cmd.c_str())) { };
 }
 
-void findhash(Parameters& parameters) {
+// find offsets for a given hash
+void findhash(Parameters& parameters, uint64 searchhash) {
   StagingDB db(parameters.stagingname);
+  IntArray tabs;
+  tabs << 20 << 20 << 10 << 10;
   Query findhash(db,"select * from offsets where hash=?");
-  findhash.bind(parameters.searchhash);
-  findhash.report(cout,"20,20,10");
+  findhash.bind(searchhash);
+  findhash.report(cout,tabs);
 }
 
+// find N hashes with highest dupcount
 void tophash(QddaDB& db, int amount = 10) {
   Query tophash(db,"select hash,blocks from kv where hash!=0 and blocks>1 order by blocks desc limit ?");
-
+  IntArray tabs;
+  tabs << 20 << 10;
   tophash.bind(amount);
-  tophash.report(cout,"20,10");
+  tophash.report(cout,tabs);
 }
 
+// update sum tables
 void update(QddaDB& db) {
   db.update();
 }
@@ -459,6 +472,7 @@ void ParseFileName(string& name) {
   if(name.find(".db")>name.length()) name += ".db";
 }
 
+// Return name for staging database - same dir as main database
 string genStagingName(string& name) {
   string tmpname;
   tmpname = name.substr(0,name.find(".db"));
@@ -466,30 +480,111 @@ string genStagingName(string& name) {
   return tmpname;
 }
 
-void errorTest() {
-  throw ERROR("Error test ") << "Extra info: user=" << getenv("USER"); // << std::endl;
+/*******************************************************************************
+ * Metadata class functions
+ ******************************************************************************/
+
+Metadata::Metadata() { 
+  setArray("x2");
 }
 
-const char* Compression::namelist[8] = { "none", "lz4", "deflate"};
-
-void Compression::setMethod(const std::string& in, int interval) {
-  setInterval(interval);
-  setMethod(in);
+void Metadata::init(int blksz, int iv, Array a, Method m) {
+  blocksize = blksz;
+  setInterval(iv);
+  array = a;
+  method = m;
 }
+
+const char* Metadata::getMethodName(int m) {
+  switch(m) {
+    case m_none:  return "none"; break;
+    case lz4:     return "lz4"; break;
+    case deflate: return "deflate"; break;
+    default:      throw ERROR("getMethodName error");
+  }
+}
+
+const char* Metadata::getArrayName(int a) {
+  switch(a) {
+    case a_none: return "None"; break;
+    case custom: return "Custom"; break;
+    case x1:     return "XtremIO X1"; break;
+    case x2:     return "XtremIO X2"; break;
+    case vmax:   return "VMAX AFA"; break;
+    case pmax:   return "PowerMAX"; break;
+    default:     throw ERROR("getArrayName error");
+  }
+}
+
+int Metadata::setArray(const std::string& in) {
+  buckets.clear();
+  stringstream ss(in);
+  string arr,blk,bucketlist;
   
-void Compression::setMethod(const std::string& in) {
-  for(int i=0; namelist[i]!=0;i++) {
-    if(in==namelist[i]) {
-      method = CompressMethod(i);
-      return;
+  const char* list = R"(
+Valid storage array types:
+--array x1      # XtremIO X1 (blocksize 8K, lz4 compression, buckets 2K, 4K, 8K)
+--array x2      # XtremIO X2 (blocksize 16K, lz4 compression, buckets 1,2,3,4,5,6,7,8,9,10,11,12,13,15,16 K)
+--array vmax    # VMAX AFA (blocksize 128K, lz4 compression, buckets 8,16,...,128 K)
+--array pmax    # PowerMAX (blocksize 128K, deflate compression, buckets 8,16,...,128 K)
+--array custom:<bs>:<bucketlist> # custom array (blocksize=bs,lz4 compression,buckets from bucketlist)
+
+custom example:
+--array custom:32:8,16,24 # custom array with 32K blocksize, lz4 compression, buckets 8, 16, 24, 32 K
+--array custom:32:8,16,24 --compress deflate # same but with deflate compression and sample interval 20
+
+)";
+
+  getline(ss,arr,':');
+  getline(ss,blk,':');
+  int newblksz = atoi(blk.c_str());
+  
+  if     (in=="list")  { cout << list << endl; return 1; }
+  else if(in=="x1")    { init(8,1,x1,lz4); buckets << 2 << 4 << 8 ; }
+  else if(in=="x2")    { init(16,1,x2,lz4); for(int i=1;i<=16;i++) if(i!=14) buckets << i; }
+  else if(in=="vmax")  { init(128,1,vmax,lz4); for(int i=8;i<=128;i+=8) buckets << i; }
+  else if(in=="pmax")  { init(128,20,pmax,deflate); for(int i=8;i<=128;i+=8) buckets << i; }
+  else if(arr=="custom") {
+    if(!blk.size()) throw ERROR("Specify blocksize");
+    while(ss.good()) {
+      getline(ss,bucketlist,',');
+      int bucket = atoi(bucketlist.c_str());
+      if(bucket<newblksz) buckets << bucket;
+      buckets << newblksz;
+    }
+    try {
+      init(newblksz,1,custom,lz4);
+    }
+    catch (BoundedRange) {
+      throw ERROR("Invalid blocksize");
     }
   }
-  throw ERROR("Invalid compression method: ") << in;
+  else throw ERROR("Unknown array type ") << in;
+  return 0;
 }
 
-void Compression::setInterval(int p1) {
-  if(p1<1 || p1>100) throw ERROR("Invalid compression interval: ") << p1;
-  interval = p1;
+// Set compression method and interval
+// format: <algo>:<interval>
+void Metadata::setMethod(const std::string& in) {
+  stringstream ss(in);
+  string smethod,is;  
+  array = a_none;
+  getline(ss,smethod,':');
+  getline(ss,is,':');
+  if(smethod=="none")         { setInterval(1); method = m_none; }
+  else if(smethod=="lz4")     { setInterval(1); method = lz4; }
+  else if(smethod=="deflate") { setInterval(20); method = deflate; }
+  else throw ERROR("Unknown compress method ") << in;
+  if(!is.empty()) { setInterval(atoi(is.c_str())); }
+}
+
+void Metadata::setInterval(int p1) {
+  try {
+    interval = p1;
+  }
+  catch (BoundedRange) {
+    throw ERROR("Invalid compression interval: ") << p1;
+  }
 }
 
 /*******************************************************************************
@@ -497,60 +592,59 @@ void Compression::setInterval(int p1) {
  ******************************************************************************/
 
 int main(int argc, char** argv) {
-  Parameters parameters = {};
-  Options    opts = {};
+  Parameters  parameters = {};
+  Options     opts = {};
+  Metadata    metadata;
 
   // set default values
   parameters.workers   = cpuCount();
   parameters.readers   = kmax_reader_threads;
   parameters.bandwidth = kdefault_bandwidth;
-  parameters.array     = kdefault_array;
 
   Parameters& p = parameters; // shorthand alias
   Options& o = opts;
+
   try {
     LongOptions opts;
-    opts.add("version"  ,'V', ""           , showversion,  "show version and copyright info");
-    opts.add("help"     ,'h', ""           , o.do_help,    "show usage");
-    opts.add("man"      ,'m', ""           , manpage,      "show detailed manpage");
-    opts.add("db"       ,'d', "<file>"     , o.dbname,     "database file path (default $HOME/qdda.db)");
-    opts.add("append"   ,'a', ""           , o.append,     "Append data instead of deleting database");
-    opts.add("delete"   , 0 , ""           , o.do_delete,  "Delete database");
-    opts.add("quiet"    ,'q', ""           , g_quiet,      "Don't show progress indicator or intermediate results");
-    opts.add("bandwidth",'b', "<mb/s>"     , p.bandwidth,  "Throttle bandwidth in MB/s (default 200, 0=disable)");
-    opts.add("array"    , 0 , "<id|def>"   , p.array,      "set array type or custom definition <x1|x2|vmax1|definition>");
-    opts.add("compress" , 0 , "<method>"   , o.compress,   "set compression method (lz4|deflate, default=lz4)");
-    opts.add("interval" , 0 , "<n>"        , o.interval,   "set compression sample interval (sample 1 per n blocks)");
-    opts.add("buckets"  , 0 , "<list>"     , p.buckets,    "set list of compress buckets");
-    opts.add("list"     ,'l', ""           , showlist,     "list supported array types and custom definition options");
-    opts.add("detail"   ,'x', ""           , p.detail,     "Detailed report (file info and dedupe/compression histograms)");
-    opts.add("dryrun"   ,'n', ""           , p.dryrun,     "skip staging db updates during scan");
-    opts.add("purge"    , 0 , ""           , o.do_purge,   "Reclaim unused space in database (sqlite vacuum)");
-    opts.add("import"   , 0 , "<file>"     , o.import,     "import another database (must have compatible metadata)");
-    opts.add("cputest"  , 0 , ""           , o.do_cputest, "Single thread CPU performance test");
-    opts.add("nomerge"  , 0 , ""           , p.skip,       "Skip staging data merge and reporting, keep staging database");
-    opts.add("debug"    , 0 , ""           , g_debug,      "Enable debug output");
-    opts.add("queries"  , 0 , ""           , g_query,      "Show SQLite queries and results"); // --show?
-    opts.add("tmpdir"   , 0 , "<dir>"      , p.tmpdir,     "Set $SQLITE_TMPDIR for temporary files");
-    opts.add("workers"  , 0 , "<wthreads>" , p.workers,    "number of worker threads");
-    opts.add("readers"  , 0 , "<rthreads>" , p.readers,    "(max) number of reader threads");
-    opts.add("findhash" , 0 , "<hash>"     , p.searchhash, "find blocks with hash=<hash> in staging db");
-    opts.add("tophash"  , 0 , "<num>"      , p.tophash,    "show top <num> hashes by refcount");
-    opts.add("squash"   , 0 , ""           , p.squash,     "set all refcounts to 1");
-    opts.add("mandump"  , 0 , ""           , o.do_mandump, "dump raw manpage to stdout");
-    opts.add("demo"     , 0 , ""           , rundemo,      "show quick demo");
+    opts.add("version"  ,'V', ""             , showversion,  "show version and copyright info");
+    opts.add("help"     ,'h', ""             , o.do_help,    "show usage");
+    opts.add("man"      ,'m', ""             , manpage,      "show detailed manpage");
+    opts.add("db"       ,'d', "<file>"       , o.dbname,     "database file path (default $HOME/qdda.db)");
+    opts.add("append"   ,'a', ""             , o.append,     "Append data instead of deleting database");
+    opts.add("delete"   , 0 , ""             , o.do_delete,  "Delete database");
+    opts.add("quiet"    ,'q', ""             , g_quiet,      "Don't show progress indicator or intermediate results");
+    opts.add("bandwidth",'b', "<mb/s>"       , p.bandwidth,  "Throttle bandwidth in MB/s (default 200, 0=disable)");
+    opts.add("array"    , 0 , "<list|array>" , o.array,      "show/set arraytype or custom (see man page section STORAGE ARRAYS)");
+    opts.add("compress" , 0 , "<method>"     , o.compress,   "set compression method <none|lz4|deflate>[:interval]");
+    opts.add("detail"   ,'x', ""             , o.detail,     "Detailed report (file info and dedupe/compression histograms)");
+    opts.add("dryrun"   ,'n', ""             , p.dryrun,     "skip staging db updates during scan");
+    opts.add("purge"    , 0 , ""             , o.do_purge,   "Reclaim unused space in database (sqlite vacuum)");
+    opts.add("import"   , 0 , "<file>"       , o.import,     "import another database (must have compatible metadata)");
+    opts.add("cputest"  , 0 , ""             , o.do_cputest, "Single thread CPU performance test");
+    opts.add("nomerge"  , 0 , ""             , p.skip,       "Skip staging data merge and reporting, keep staging database");
+    opts.add("debug"    , 0 , ""             , g_debug,      "Enable debug output");
+    opts.add("queries"  , 0 , ""             , g_query,      "Show SQLite queries and results");
+    opts.add("tmpdir"   , 0 , "<dir>"        , p.tmpdir,     "Set $SQLITE_TMPDIR for temporary files");
+    opts.add("workers"  , 0 , "<wthreads>"   , p.workers,    "number of worker threads");
+    opts.add("readers"  , 0 , "<rthreads>"   , p.readers,    "(max) number of reader threads");
+    opts.add("findhash" , 0 , "<hash>"       , o.shash,      "find blocks with hash=<hash> in staging db");
+    opts.add("tophash"  , 0 , "<num>"        , o.tophash,    "show top <num> hashes by refcount");
+    opts.add("squash"   , 0 , ""             , o.squash,     "set all refcounts to 1");
+    opts.add("mandump"  , 0 , ""             , o.do_mandump, "dump raw manpage to stdout");
+    opts.add("bashdump" , 0 , ""             , o.do_bashdump,"dump bash_completion script to stdout");
+    opts.add("demo"     , 0 , ""             , rundemo,      "show quick demo");
 #ifdef __DEBUG
-    opts.add("update"   , 0 , ""           , o.do_update,  "update temp tables (debug only!)");
-    opts.add("buffers"  , 0 , "<buffers>"  , p.buffers,    "number of buffers (debug only!)");
-    opts.add("extest"   , 0 , ""           , errorTest,    "Test error handling");
+    opts.add("update"   , 0 , ""             , o.do_update,  "update temp tables (debug only!)");
+    opts.add("buffers"  , 0 , "<buffers>"    , p.buffers,    "number of buffers (debug only!)");
 #endif
 
     int rc=opts.parse(argc,argv);
     if(rc) return 0; // opts.parse executed a message function
-  
-    if(o.do_help)         { showhelp(opts); return 0; }
-    else if(o.do_mandump) { mandump(opts); return 0; }
     
+    if(o.do_help)          { showhelp(opts); return 0; }
+    else if(o.do_mandump)  { mandump(opts); return 0; }
+    else if(o.do_bashdump) { showcomplete(); return 0; }
+
     if(!p.tmpdir.empty()) setenv("SQLITE_TMPDIR",p.tmpdir.c_str(),1);
   
     showtitle();
@@ -561,16 +655,11 @@ int main(int argc, char** argv) {
       if(!g_quiet) cout << "Deleting database " << o.dbname << endl;
       Database::deletedb(o.dbname); return 0;
     }
-
-    if     (p.array == "x1")    { p.blocksize = 8;   p.compression.setMethod("lz4",1);   p.buckets="2+4+8" ; }
-    else if(p.array == "x2")    { p.blocksize = 16;  p.compression.setMethod("lz4",1);   p.buckets="1,2,3,4,5,6,7,8,9,10,11,12,13,15,16"; }
-    else if(p.array == "vmax1") { p.blocksize = 128; p.compression.setMethod("deflate",20); p.buckets="8,16,24,32.40,48,56,64,72,80,88,96,104,112,120,128"; }
-    
-    if(!o.compress.empty()) p.compression.setMethod(o.compress);
-    if(o.interval) p.compression.setInterval(o.interval);
-
+    if(o.array.size()>0) { if(metadata.setArray(o.array)) return 0; }
+    if(!o.compress.empty()) metadata.setMethod(o.compress);
   }
   catch (Fatal& e) { e.print(); return 10; }
+
 
   v_FileData filelist;
 
@@ -594,24 +683,24 @@ int main(int argc, char** argv) {
     }
     if(!Database::exists(o.dbname)) QddaDB::createdb(o.dbname);
     QddaDB db(o.dbname);
-    
-    db.setmetadata(p.blocksize,p.compression,p.array.c_str(),p.buckets);
+
+    db.setmetadata(metadata.getBlocksize(), metadata.getMethod(), metadata.getInterval(), metadata.getArray(), metadata.getBuckets());
 
     if(filelist.size()>0) 
       analyze(filelist, db, parameters);
 
     if(g_abort) return 1;
 
-    if(o.do_purge)             { db.vacuum();           }
-    else if(!o.import.empty()) { import(db,o.import);   }
-    else if(o.do_cputest)      { cputest(db,p) ;        }
-    else if(o.do_update)       { update(db) ;           }
-    else if(p.searchhash!=0)   { findhash(p);           }
-    else if(p.tophash!=0)      { tophash(db,p.tophash); }
-    else if(p.squash!=0)       { db.squash();           }
+    if     (o.do_purge)        { db.vacuum();            }
+    else if(!o.import.empty()) { import(db,o.import);    }
+    else if(o.do_cputest)      { cputest(db,p) ;         }
+    else if(o.do_update)       { update(db) ;            }
+    else if(o.shash!=0)        { findhash(p, o.shash);   }
+    else if(o.tophash!=0)      { tophash(db, o.tophash); }
+    else if(o.squash)          { db.squash();            }
     else {
       if(!parameters.skip)     { merge(db,parameters); }
-      if(parameters.detail)    { reportDetail(db); }
+      if(o.detail)             { reportDetail(db); }
       else if (!p.skip)        { report(db); }
     }
   }

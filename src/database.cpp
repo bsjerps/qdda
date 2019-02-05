@@ -16,30 +16,30 @@
 #include <cstring>
 #include <unistd.h>
 
-#include "sqlite/sqlite3.h"
-
 #include "error.h"
 #include "tools.h"
 #include "database.h" 
-#include "qdda.h"
 
 extern bool g_debug;
 extern bool g_query;
 extern const char* PROGVERSION;
-extern ulong starttime;
+extern uint64 starttime;
 
 using std::string;
 
 /*******************************************************************************
-* SQLite Schema definition:
+* About SQLite Schema definitions:
 *
-* kv: key-value store, k = hash of block, v = block count, b = compressed bytes
-* metadata keeps track of the blocksize - cannot chance blocksize once created. 
-* Force metadata to have one row only. 
-* Files keeps track of which and how many files were imported.
-* buckets holds the min/max sizes of each compression bucket, indexed by search key
-* bucketdesc holds the search key <> descriptions
-*
+* kv: key-value store,
+* hash = hash of block,
+* blocks = block count,
+* bytes = compressed bytes
+* 
+* metadata table keeps track of blocksize and other info - 
+* Cannot chance blocksize once created. Force metadata to have one row only.
+* Files table keeps track of which and how many files were imported.
+* buckets table holds the min/max sizes of each compression bucket, 
+* indexed by search key
 ******************************************************************************/
 
 /*******************************************************************************
@@ -49,6 +49,8 @@ using std::string;
 Query::Query(Database& db, const char* query) { init(db.db, query) ;}
 Query::Query(sqlite3* db, const char* query)  { init(db, query) ;}
 
+
+// 'init' style constructor (due to C++03)
 void Query::init(sqlite3* db, const char* query) {
   ref = 0; // reset parameter count
   if(!db) throw ERROR("sqlite3 not initialized ") << query;
@@ -66,10 +68,11 @@ int Query::bind() {
   int rc = sqlite3_bind_null(pStmt, ++ref);
   if(rc!=SQLITE_OK) throw ERROR("MySQL bind variable NULL failed, query: ") << sql() << ", " << sqlerror();
   return 0;
-}  
-int Query::bind(const ulong p) { 
+}
+
+int Query::bind(const sqlite3_int64 p) { 
   int rc = sqlite3_bind_int64(pStmt, ++ref, p);
-  if(rc!=SQLITE_OK) throw ERROR("MySQL bind variable ulong failed, query: ") << sql() << ", " << sqlerror();
+  if(rc!=SQLITE_OK) throw ERROR("MySQL bind variable uint64 failed, query: ") << sql() << ", " << sqlerror();
   return 0;
 };
 
@@ -100,27 +103,27 @@ int Query::reset() {
   return 0;
 }
 
-//char *sqlite3_expanded_sql(sqlite3_stmt *pStmt);
 // simple exec of prepared statement, no return value
 void Query::exec() {
   step();
   reset();
 }
-// simple exec of prepared statement, ulong return value
-ulong Query::execl() {
+
+// simple exec of prepared statement, int64 return value
+sql_int Query::execi() {
   step();
-  ulong retval = sqlite3_column_int64(pStmt, 0);
+  sql_int retval = sqlite3_column_int64(pStmt, 0);
   if(g_query) std::cout << " = " << retval;
   // handle multiple rows returned (SQLITE_DONE) ?
   reset();
   return retval;
 }
 
-ulong Query::execl(ulong p1)           { bind(p1); return execl(); }
-ulong Query::execl(ulong p1, ulong p2) { bind(p1);bind(p2); return execl(); }
+sql_int Query::execi(sql_int p1)             { bind(p1); return execi(); }
+sql_int Query::execi(sql_int p1, sql_int p2) { bind(p1);bind(p2); return execi(); }
 
 // simple exec of prepared statement, float return value
-float Query::execf() {
+double Query::execf() {
   step();
   float retval = sqlite3_column_double(pStmt, 0);
   if(g_query) std::cout << " = " << retval;
@@ -143,25 +146,21 @@ const string Query::execstr() {
   return retval;
 }
 
-void Query::report(std::ostream& os, const string& tabstr) {
+// Generate a report to os. Requires an IntArray containing the tab stops.
+void Query::report(std::ostream& os, const IntArray& tabs) {
   char separator = ' ';
-  std::vector<int>  tabs;
-  int               rc = 0;  
-  string            str;
-  std::stringstream ss(tabstr);
-  
-  while(ss.good()) {
-    getline(ss,str,',');
-    tabs.push_back(atoi(str.c_str()));
-  }
+  int rc = 0;  
   if(g_query) { print(std::cout); std::cout << std::endl; }
   int cols = sqlite3_column_count(pStmt);
+  if(cols>tabs.size()) throw ERROR("Too few tabs in report:\n") << sql();
   int i;
   for(i=0;i<cols; i++) {
-    if(tabs[i]==0) break;
-    if(tabs[i]>0) std::cout << std::left;
-    else os << std::right;
-    if(i<tabs.size()) os << std::setw(abs(tabs[i]));
+    if(i<tabs.size()) {
+      if(tabs[i]==0) break;
+      if(tabs[i]>0) os << std::left;
+      else os << std::right;
+      if(i<tabs.size()) os << std::setw(abs(tabs[i]));
+    }
     os << sqlite3_column_name(pStmt,i);
     if(i<cols-1) os << separator;
   }
@@ -191,12 +190,13 @@ void Query::report(std::ostream& os, const string& tabstr) {
   sqlite3_reset(pStmt);
 }
 
+// Print the query (with expanded bind variables)
 void Query::print(std::ostream& os) {
   os << sqlite3_expanded_sql(pStmt);
 }
 
-Query& Query::operator<< (ulong p)         { bind (p); return *this; }
-Query& Query::operator<< (uint32_t p)      { bind (ulong(p)); return *this; }
+// Stream-style bind operators
+Query& Query::operator<< (sql_int p)       { bind (p); return *this; }
 Query& Query::operator<< (const char* p)   { bind (p); return *this; }
 Query& Query::operator<< (const string& p) { bind (p); return *this; }
 
@@ -204,7 +204,6 @@ Query& Query::operator<< (const string& p) { bind (p); return *this; }
  * Database class functions
  ******************************************************************************/
 
-// Open existing DB
 Database::Database(const string& fn) {
   int rc = sqlite3_open_v2(fn.c_str(), &db, SQLITE_OPEN_READWRITE, NULL);
   if(rc) throw ERROR("Can't open database, ") << sqlite3_errmsg(db);
@@ -231,9 +230,9 @@ int Database::createdb(const string& fn, const char* schema) {
 }
 
 // detach tempdb and finalize all statements before closing db
-Database::~Database()   { close();  }
-void Database::begin()  { sql("begin"); }
-void Database::end()    { sql("end"); }
+Database::~Database()  { close();  }
+void Database::begin() { sql("begin"); }
+void Database::end()   { sql("end"); }
 
 // test if specified file is SQLite3 file
 int Database::isValid(const char * fn) {
@@ -279,7 +278,7 @@ const char* Database::filename() {
   return sqlite3_db_filename(db, NULL);
 }
 
-ulong Database::filesize() {
+size_t Database::filesize() {
   if(!db) return 0;
   return fileSize(sqlite3_db_filename(db, NULL));
 }
@@ -317,6 +316,7 @@ int Database::unlinkdb() {
 void Database::sql(const char* query) {
   int rc=0;
   char * errmsg;
+  if(g_query) std::cout << query << std::endl;
   rc = sqlite3_exec(db, query, 0, 0, &errmsg);
   if( rc != SQLITE_OK ) {
     throw ERROR("Cannot execute SQL, ") << query << ", " << sqlite3_errmsg(db);
@@ -325,12 +325,12 @@ void Database::sql(const char* query) {
 
 void Database::sql(const string& query) { sql(query.c_str()); }
 
-ulong Database::getul(const char* query) {
+sql_int Database::getint(const char* query) {
   Query q(db,query);
-  return q.execl();
+  return q.execi();
 }
 
-float Database::getfl(const char* query) {
+double Database::getfloat(const char* query) {
   Query q(db,query);
   return q.execf();
 }
@@ -340,12 +340,11 @@ const string Database::getstr(const char* query) {
   return q.execstr();
 }
 
-
 /*******************************************************************************
  * Staging DB class functions
  ******************************************************************************/
 
-void StagingDB::createdb(const string& fn, ulong blocksize) {
+void StagingDB::createdb(const string& fn, int64 blocksize) {
   Database::createdb(fn,R"(
 PRAGMA journal_mode = off;
 PRAGMA synchronous = off;
@@ -368,6 +367,7 @@ StagingDB::StagingDB(const string& fn): Database(fn),
   sql("PRAGMA journal_mode = off");  // speed up, don't care about consistency
   sql("PRAGMA synchronous = off");   // same
   
+  // TBD: figure out what to do with these
   //sql("PRAGMA cache_spill = off");
   //sql("PRAGMA cache_size = 10000");
   //sql("PRAGMA locking_mode = EXCLUSIVE");
@@ -377,24 +377,25 @@ StagingDB::StagingDB(const string& fn): Database(fn),
   sql("PRAGMA mmap_size = 65536");
 }
 
-ulong StagingDB::blocksize() { return getul("select blksz from metadata"); }
-ulong StagingDB::getrows()   { return getul("select count(*) from staging"); }
+sql_int StagingDB::blocksize() { return getint("select blksz from metadata"); }
+sql_int StagingDB::getrows()   { return getint("select count(*) from staging"); }
 
-void StagingDB::setblocksize(ulong p) {
+void StagingDB::setblocksize(sql_int p) {
   Query q(*this,"insert into metadata (blksz,compression) values (?,'dummy')");
   q << p;
   q.exec();
 }
 
 // insert hash, compressed bytes into staging
-void StagingDB::insertdata(ulong hash, ulong bytes) {
+void StagingDB::insertdata(uint64 hash, uint64 bytes) {
   q_insert.bind(hash);
   if(bytes!=-1) q_insert.bind(bytes);
-  else q_insert.bind();
+  else q_insert.bind(); // NULL for blocks without bytes value (-1)
   q_insert.exec();
 } 
 
-int StagingDB::fillrandom(ulong rows, int blocksize, int dup) {
+// Fill staging db with random data
+int StagingDB::fillrandom(sql_int rows, int blocksize, int dup) {
   Query q(*this,R"(
 with recursive 
 rnd(k,b) AS (
@@ -406,14 +407,15 @@ INSERT INTO STAGING SELECT NULL, K,B FROM rnd,c;
 )");
   begin();
   q << rows;
-  q << (ulong)blocksize*1024;
-  q << (ulong)dup;
+  q << (sql_int)blocksize*1024;
+  q << (sql_int)dup;
   q.exec();
   end();
   return 0;
 }
 
-int StagingDB::fillzero(ulong rows) {
+// Fill staging db with zeroes
+int StagingDB::fillzero(sql_int rows) {
   Query q(*this,R"(
 with recursive 
 rnd(k,b) AS (
@@ -428,9 +430,10 @@ SELECT 0, 0 FROM rnd LIMIT ?1
   return 0;
 }
 
-int StagingDB::insertmeta(const string& name, ulong blocks, ulong bytes) {
+// insert file metadata
+int StagingDB::insertmeta(const string& name, sql_int blocks, sql_int bytes) {
   Query q(*this,"insert into files (name,blocks,hostname,timestamp,bytes) values (?,?,?,?,?)");
-  q << name << blocks << hostName() << starttime << bytes;
+  q << name << blocks << hostName() << sql_int(starttime) << bytes;
   q.exec();
   return 0;
 }
@@ -447,19 +450,21 @@ QddaDB::QddaDB(const string& fn): Database(fn) {
   sql("PRAGMA synchronous = off");   // same
 }
 
-void QddaDB::squash()     { sql("update kv set blocks=1"); update(); }
-ulong QddaDB::blocksize() { return getul("select blksz from metadata"); }
-ulong QddaDB::getrows()   { return getul("select count(*) from kv"); }
-const string QddaDB::getarrayid() { return getstr("select arrayid from metadata"); }
-  
+void    QddaDB::squash()       { sql("update kv set blocks=1"); update(); }
+sql_int QddaDB::getblocksize() { return getint("select blksz from metadata"); }
+sql_int QddaDB::getinterval()  { return getint("select interval from metadata"); }
+sql_int QddaDB::getrows()      { return getint("select count(*) from kv"); }
+sql_int QddaDB::getarrayid()   { return getint("select arrayid from metadata"); }
+sql_int QddaDB::getmethod()    { return getint("select method from metadata"); }
+
 void QddaDB::createdb(const string& fn) {
   Database::createdb(fn,R"(
 CREATE TABLE IF NOT EXISTS metadata(lock char(1) not null default 1
 , version text
 , blksz integer
-, compression text check (compression in ('none', 'lz4', 'deflate')) default 'none'
-, level integer
-, arrayid text check (arrayid in ('custom', 'x1', 'x2', 'vmax1')) default 'none'
+, method integer
+, interval integer
+, arrayid integer
 , created integer
 , constraint pk_t1 primary key(lock), constraint ck_t1_l check (lock=1));
 
@@ -534,30 +539,25 @@ select size, buckets, buckets*blksz/1024.0 RawMiB, perc, blocks, blocks*blksz/10
  * Other methods can be loaded manually into the database after creating the DB
  ******************************************************************************/
 
-void QddaDB::setmetadata(int blocksz, const char* compr, const char* name, const string& buckets) {
-  if(blocksize()) return; // do nothing if metadata is already set
+void QddaDB::setmetadata(sql_int blocksz, sql_int method, sql_int interval, sql_int array, const IntArray& buckets) {
+  if(getblocksize()) return; // do nothing if metadata is already set
   if(blocksz>128) throw ERROR("Blocksize too large: ") << blocksz;
-  Query q_meta(*this,"insert into metadata (version, blksz, compression, arrayid, created) values (?,?,?,?,?)");
-  q_meta << PROGVERSION << (ulong)blocksz << compr << name << epoch();
+  Query q_meta(*this,"insert into metadata (version, blksz, method, interval, arrayid, created) values (?,?,?,?,?,?)");
+  q_meta << PROGVERSION << blocksz << method << interval << array << sql_int(epoch());
   q_meta.exec();
   loadbuckets(buckets);
 }
 
-void QddaDB::loadbuckets(const string& s) {
+void QddaDB::loadbuckets(const IntArray& v) {
   Query loadbuckets(*this,"insert or replace into buckets values (?)");
   Query truncbuckets(*this,"delete from buckets");
   truncbuckets.exec();
-  loadbuckets.bind(0ul);
+  loadbuckets.bind((sqlite3_int64)0);
   loadbuckets.exec();
-  std::stringstream ss(s);
-  string str;
-  while(ss.good()) {
-    getline(ss,str,',');
-    loadbuckets.bind(atoll(str.c_str()));
+  for(int i=0; i < v.size(); i++) {
+    loadbuckets.bind(v[i]);
     loadbuckets.exec();
-  }
-  loadbuckets.bind((int)blocksize());
-  loadbuckets.exec();
+  };
 }
 
 /*
@@ -571,7 +571,6 @@ group by tmpdb.staging.k
 // merge staging data into main table (performance optimized)
 void  QddaDB::merge(const string& name) {
   attach("tmpdb",name);
-
   Query q_merge(db,"with t(hash,blocks,bytes) as ("
                    "select hash,blocks,bytes from kv union all "
                    "select hash,1,bytes from tmpdb.staging"
@@ -581,18 +580,19 @@ void  QddaDB::merge(const string& name) {
                    "select name,hostname,timestamp,blocks,bytes from tmpdb.files");
   q_merge.exec();
   q_copy.exec();
-  
   detach("tmpdb");
   update();
 }
 
+// update results tables
 void QddaDB::update() {
   sql("delete from m_sums_compressed;\n"
       "delete from m_sums_deduped;\n"
       "insert into m_sums_compressed select * from v_sums_compressed;\n"
       "insert into m_sums_deduped select * from v_sums_deduped;\n");
 }
-      
+
+// import another database      
 void QddaDB::import(const string& fn) {
   attach("impdb",fn);
   sql("insert or replace into main.kv \n"

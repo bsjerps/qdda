@@ -5,7 +5,6 @@
  * License     : GPLv3+
  * Disclaimer  : See https://www.gnu.org/licenses/gpl-3.0.txt
  * More info   : http://outrun.nl/wiki/qdda
- * -----------------------------------------------------------------------------
  ******************************************************************************/
 
 #include <iostream>
@@ -25,7 +24,11 @@
 #include "qdda.h"
 #include "threads.h"
 
-using namespace std;
+using std::cout;
+using std::cerr;
+using std::string;
+using std::endl;
+using std::flush;
 
 extern bool g_debug;
 extern bool g_quiet;
@@ -36,40 +39,158 @@ const size_t kbufsize    = 1024;
 
 std::mutex mx_print;
 
-DataBuffer::DataBuffer(ulong blocksize, ulong blocksps) {
-  size = blocksps;
-  blocksize_bytes = blocksize * 1024;
-  bufsize      = blocksize_bytes * blocksps;
-  readbuf      = new char[bufsize]();
-  used         = 0;
-  blocks       = 0;
-  bytes        = 0;
-  v_hash.resize(size);
-  v_bytes.resize(size);
+typedef std::lock_guard<std::mutex> Lockguard;
+
+/*******************************************************************************
+ * Helper functions
+ ******************************************************************************/
+
+// get the process thread id from within a thread
+long threadPid() { return (long int)syscall(SYS_gettid); }
+
+// print the thread id (debugging)
+void printthread(string& msg) {
+  Lockguard lock(mx_print);
+  if(g_debug) std::cerr << msg << std::endl << std::flush;
+}
+
+/*******************************************************************************
+ * Databuffer class - holds <blockspercycle> blocks of data from a stream
+ * read by the reader to be processed by the worker
+ ******************************************************************************/
+
+DataBuffer::DataBuffer(int64 blocksize, int64 sz_blocks) {
+  blocks      = sz_blocks;
+  blockbytes  = blocksize * 1024;
+  bufsize     = blockbytes * blocks;
+  readbuf     = new char[bufsize]();
+  used        = 0;
+  blockcount  = 0;
+  bytes       = 0;
+  v_hash.resize(blocks);
+  v_bytes.resize(blocks);
 }
 
 DataBuffer::~DataBuffer() { delete[] readbuf; }
 void DataBuffer::reset()  { used = 0; }
 
-// access to the nth block in the buffer
+// access to the nth block in the buffer - TBD: range checking!
 char* DataBuffer::operator[](int n) {
-  return readbuf + (n*blocksize_bytes);
+  return readbuf + (n*blockbytes);
 }
 
-IOThrottle::IOThrottle(ulong m) { mibps = m; }
+/*******************************************************************************
+ * IOThrottle class - holds shared data to provide IO bandwidth throttling
+ ******************************************************************************/
+
+IOThrottle::IOThrottle(int64 m) { mibps = m; }
 
 // Request to read x kb, microsleep to match required bandwidth
-void IOThrottle::request(ulong kb) {
+void IOThrottle::request(int64 kb) {
   if(!mibps) return; // immediately return if we don't throttle
-  std::lock_guard<std::mutex> lock(mx_throttle);
+  Lockguard lock(mx_throttle);
   stopwatch.lap();
-  ulong microsec = (1024 * kb) / mibps;
+  int64 microsec = (1024 * kb) / mibps;
   if(microsec > stopwatch)
     usleep(microsec - stopwatch);
   stopwatch.reset();
 }
 
-SharedData::SharedData(int buffers, int files, ulong blksz, StagingDB* db, int bw): 
+/*******************************************************************************
+ * Ringbuffer class - Keeps track of multiple buffers between threads
+ ******************************************************************************/
+
+RingBuffer::RingBuffer(size_t sz) {
+  head = 0;
+  tail = 0;
+  work = 0;
+  size = sz;
+  done = false;
+  mx_buffer.resize(sz);
+}
+
+void RingBuffer::release(size_t ix) {
+  mx_buffer[ix].unlock();
+}
+
+void RingBuffer::print() {
+  Lockguard lock(mx_print);
+  cout <<  "T" << std::setw(4) << tail 
+       << " W" << std::setw(4) << work 
+       << " H" << std::setw(4) << head
+       << endl << flush;
+}
+
+bool RingBuffer::isFull() {
+  Lockguard lock(mx_meta);
+  return ((head+1) % size) == tail;
+}
+
+bool RingBuffer::hasData() {
+  Lockguard lock(mx_meta);
+  return work != head;
+}
+
+bool RingBuffer::isEmpty() {
+  Lockguard lock(mx_meta);
+  return tail == work;
+}
+
+bool RingBuffer::isDone() {
+  Lockguard lock(mx_meta);
+  if(done) {
+    if(head == tail) return true;
+  }
+  return false;
+}
+
+int RingBuffer::getfree(size_t& ix) {
+  if(g_abort) return 2;
+  Lockguard lock(headbusy);
+  ix = head;
+  while (isFull()) {
+    usleep(10000);
+    if(isDone()) return 1;
+    if(g_abort) return 2;
+  }
+  mx_buffer[ix].lock();
+  head = ++head % size; // move head to the next  
+  return 0;
+}
+
+int RingBuffer::getfull(size_t& ix) {
+  if(g_abort) return 2;
+  Lockguard lock(workbusy);
+  ix = work;
+  while(!hasData()) {
+    usleep(10000);
+    if(isDone()) return 1;
+    if(g_abort) return 2;
+  }
+  mx_buffer[ix].lock();
+  work = ++work % size;  // move ptr to next
+  return 0;
+}
+
+int RingBuffer::getused(size_t& ix) {
+  if(g_abort) return 2;
+  Lockguard lock(tailbusy);
+  ix = tail;
+  while (isEmpty()) {
+    usleep(10000);
+    if(isDone()) return 1;
+    if(g_abort) return 2;
+  }
+  mx_buffer[ix].lock();
+  tail = ++tail % size;  // we need the next
+  return 0;
+}
+
+/*******************************************************************************
+ * SharedData class - for easy sharing between threads using only one parameter
+ ******************************************************************************/
+
+SharedData::SharedData(int buffers, int files, int64 blksz, StagingDB* db, int bw): 
   throttle(bw), rb(buffers)
 {
   blocksize      = blksz;
@@ -90,102 +211,10 @@ SharedData::~SharedData() {
   delete[] filelocks;
 }
 
-// get the process thread id from within a thread
-long threadPid() { return (long int)syscall(SYS_gettid); }
+/*******************************************************************************
+ * Updater - reads results from buffers and updates staging database
+ ******************************************************************************/
 
-// print the thread id (debugging)
-void printthread(string& msg) {
-  std::lock_guard<std::mutex> lock(mx_print);
-  if(g_debug) std::cerr << msg << std::endl << std::flush;
-}
-
-RingBuffer::RingBuffer(size_t sz) {
-  head = 0;
-  tail = 0;
-  work = 0;
-  size = sz;
-  done = false;
-  mx_buffer.resize(sz);
-}
-
-void RingBuffer::release(size_t ix) {
-  mx_buffer[ix].unlock();
-}
-
-void RingBuffer::print() {
-  std::lock_guard<std::mutex> lock(mx_print);
-  cout <<  "T" << setw(4) << tail 
-       << " W" << setw(4) << work 
-       << " H" << setw(4) << head
-       << endl << flush;
-}
-
-bool RingBuffer::isFull() {
-  std::lock_guard<std::mutex> lock(mx_meta);
-  return ((head+1) % size) == tail;
-}
-
-bool RingBuffer::hasData() {
-  std::lock_guard<std::mutex> lock(mx_meta);
-  return work != head;
-}
-
-bool RingBuffer::isEmpty() {
-  std::lock_guard<std::mutex> lock(mx_meta);
-  return tail == work;
-}
-
-bool RingBuffer::isDone() {
-  std::lock_guard<std::mutex> lock(mx_meta);
-  if(done) {
-    if(head == tail) return true;
-  }
-  return false;
-}
-
-int RingBuffer::getfree(size_t& ix) {
-  if(g_abort) return 2;
-  std::lock_guard<std::mutex> lock(headbusy);
-  ix = head;
-  while (isFull()) {
-    usleep(10000);
-    if(isDone()) return 1;
-    if(g_abort) return 2;
-  }
-  mx_buffer[ix].lock();
-  head = ++head % size; // move head to the next  
-  return 0;
-}
-
-int RingBuffer::getfull(size_t& ix) {
-  if(g_abort) return 2;
-  std::lock_guard<std::mutex> lock(workbusy);
-  ix = work;
-  while(!hasData()) {
-    usleep(10000);
-    if(isDone()) return 1;
-    if(g_abort) return 2;
-  }
-  mx_buffer[ix].lock();
-  work = ++work % size;  // move ptr to next
-  return 0;
-}
-
-int RingBuffer::getused(size_t& ix) {
-  if(g_abort) return 2;
-  std::lock_guard<std::mutex> lock(tailbusy);
-  ix = tail;
-  while (isEmpty()) {
-    usleep(10000);
-    if(isDone()) return 1;
-    if(g_abort) return 2;
-  }
-  mx_buffer[ix].lock();
-  tail = ++tail % size;  // we need the next
-  return 0;
-}
-
-// updater thread, picks processed buffers and update staging database
 void updater(int thread, SharedData& sd, Parameters& parameters) {
   armTrap();
   pthread_setname_np(pthread_self(),"qdda-updater");
@@ -205,12 +234,16 @@ void updater(int thread, SharedData& sd, Parameters& parameters) {
   sd.p_sdb->end();
 }
 
-// read a stream(file) into available buffers
-ulong readstream(int thread, SharedData& shared, FileData& fd) {
+/*******************************************************************************
+ * Readstream - reads from stream (block/file/pipe) and fills buffers
+ ******************************************************************************/
+
+size_t readstream(int thread, SharedData& shared, FileData& fd) {
   int rc;
-  ulong bytes,blocks;
-  ulong totbytes=0;
-  const ulong blocksize = shared.blocksize;
+  int64 blocks;
+  size_t bytes;
+  size_t totbytes=0;
+  const uint64 blocksize = shared.blocksize;
   size_t i;
 
   size_t iosize = shared.blockspercycle * blocksize * 1024;
@@ -246,13 +279,15 @@ ulong readstream(int thread, SharedData& shared, FileData& fd) {
     if(fd.limit_mb && totbytes >= fd.limit_mb*1048576) break; // end if we only read a partial file
   }
   fd.ifs->close();
-  delete[] readbuf;
   delete[] zerobuf;
+  delete[] readbuf;
   return totbytes;
 }
 
-// reader thread, pick a file if available
-// each reader handles 1 file at a time
+/*******************************************************************************
+ * Reader thread - finds one available file and starts readstream
+ ******************************************************************************/
+
 void reader(int thread, SharedData& sd, v_FileData& filelist) {
   armTrap();
   string self = "qdda-reader-" + toString(thread,0);
@@ -260,33 +295,33 @@ void reader(int thread, SharedData& sd, v_FileData& filelist) {
   for(int i=0; i<filelist.size(); i++) {
     if(sd.filelocks[i].trylock()) continue; // in use
     if(filelist[i].ifs->is_open()) {
-      ulong bytes = readstream(thread, sd, filelist[i]);
-      std::lock_guard<std::mutex> lock(sd.mx_database);
+      size_t bytes = readstream(thread, sd, filelist[i]);
+      Lockguard lock(sd.mx_database);
       sd.p_sdb->insertmeta(filelist[i].filename, bytes/sd.blocksize/1024, bytes);
     }
     sd.filelocks[i].unlock();
   }
 }
 
-// worker thread, picks filled buffers and runs hash/compression
-// then updates the database and stats counters
+/*******************************************************************************
+ * Worker thread - picks filled buffers and runs hash/compression algorithms
+ ******************************************************************************/
+
 void worker(int thread, SharedData& sd, Parameters& parameters) {
   armTrap();
   string self = "qdda-worker-" + toString(thread,0);
   pthread_setname_np(pthread_self(), self.c_str());
-  const ulong blocksize = sd.blocksize;
+  const int64 blocksize = sd.blocksize;
   char* dummy           = new char[blocksize*1024];
   size_t i              = 0;
   uint64_t hash;
   int bytes;
-  const int interval = parameters.compression.getInterval();
 
+  // define function pointer to the right compress function
   u_int (*compress)(const char*,char*,const int);
-  Compression cp;
-
-  switch(parameters.compression.getMethod()) {
-    case Compression::lz4     : compress = compress_lz4;     break;
-    case Compression::deflate : compress = compress_deflate; break;
+  switch(sd.method) {
+    case Metadata::lz4     : compress = compress_lz4;     break;
+    case Metadata::deflate : compress = compress_deflate; break;
     default: compress = compress_none;
   }
 
@@ -299,20 +334,20 @@ void worker(int thread, SharedData& sd, Parameters& parameters) {
       DataBuffer& r_blockdata = sd.v_databuffer[i]; // shorthand to buffer for readabily
       hash = hash_md5(r_blockdata[j], dummy, blocksize*1024); // get hash
       
-      if(rand()%interval==0)
+      if(rand()%sd.interval==0)
         bytes = hash ? compress(r_blockdata[j], dummy, blocksize*1024) : 0; // get bytes, 0 if hash=0
-      else bytes=-1;
+      else bytes=-1; // special case: -1 means this block was not analyzed for compression
 
       r_blockdata.v_hash[j] = hash;
       r_blockdata.v_bytes[j] = bytes;
-      sd.v_databuffer[i].blocks++;
+      sd.v_databuffer[i].blockcount++;
       sd.v_databuffer[i].bytes += blocksize*1024;
       {
-        std::lock_guard<std::mutex> lock(sd.mx_shared);
+        Lockguard lock(sd.mx_shared);
         sd.blocks++;
         sd.bytes += blocksize*1024;
       }
-      std::lock_guard<std::mutex> lock(mx_print);
+      Lockguard lock(mx_print);
       if(sd.blocks%10000==0 || sd.blocks == 10) {
         progress(sd.blocks, blocksize, sd.bytes);           // progress indicator
       }
@@ -322,20 +357,25 @@ void worker(int thread, SharedData& sd, Parameters& parameters) {
   delete[] dummy;
 }
 
-// Setup staging DB, worker and reader threads to start data analyzer
+/*******************************************************************************
+ * Analyze function - Setup staging DB, worker and reader threads
+ * to start data analyzer
+ ******************************************************************************/
+
 void analyze(v_FileData& filelist, QddaDB& db, Parameters& parameters) {
   if(g_debug) cout << "Main thread pid " << getpid() << endl;
 
   Database::deletedb(parameters.stagingname);
-  StagingDB::createdb(parameters.stagingname, db.blocksize());
+  StagingDB::createdb(parameters.stagingname, db.getblocksize());
   StagingDB stagingdb(parameters.stagingname);
 
   int workers     = parameters.workers;
-  int readers     = min( (int)filelist.size(), parameters.readers);
+  int readers     = std::min( (int)filelist.size(), parameters.readers);
   int buffers     = parameters.buffers ? parameters.buffers : workers + readers + kextra_buffers;
-  ulong blocksize = db.blocksize();
 
-  SharedData sd(buffers, filelist.size(), blocksize, &stagingdb, parameters.bandwidth);
+  SharedData sd(buffers, filelist.size(), db.getblocksize(), &stagingdb, parameters.bandwidth);
+  sd.interval = db.getinterval();
+  sd.method   = db.getmethod();
 
   if(!g_quiet) cout
     << "Scanning " << filelist.size() << " files, " 
@@ -344,14 +384,14 @@ void analyze(v_FileData& filelist, QddaDB& db, Parameters& parameters) {
     << buffers << " buffers, "
     << parameters.bandwidth << " MB/s max" << endl;
 
-  thread updater_thread;
-  thread reader_thread[readers];
-  thread worker_thread[workers];
+  std::thread updater_thread;
+  std::thread reader_thread[readers];
+  std::thread worker_thread[workers];
   Stopwatch stopwatch;
 
-  updater_thread = thread(updater,0, std::ref(sd), std::ref(parameters));
-  for(int i=0; i<workers; i++) worker_thread[i] = thread(worker, i, std::ref(sd), std::ref(parameters));
-  for(int i=0; i<readers; i++) reader_thread[i] = thread(reader, i, std::ref(sd), std::ref(filelist));
+  updater_thread = std::thread(updater,0, std::ref(sd), std::ref(parameters));
+  for(int i=0; i<workers; i++) worker_thread[i] = std::thread(worker, i, std::ref(sd), std::ref(parameters));
+  for(int i=0; i<readers; i++) reader_thread[i] = std::thread(reader, i, std::ref(sd), std::ref(filelist));
 
   signal(SIGINT, SIG_IGN); // ignore ctrl-c
 
@@ -361,23 +401,22 @@ void analyze(v_FileData& filelist, QddaDB& db, Parameters& parameters) {
   updater_thread.join();
 
   stopwatch.lap();
-  stringstream ss;
+  std::stringstream ss;
   ss << " Scanned in " << stopwatch.seconds() << " seconds";
   progress(sd.blocks, sd.blocksize, sd.bytes, ss.str().c_str());
   if(!g_quiet) cout << endl;
-  ulong sumblocks = 0;
-  ulong sumbytes = 0;
+  int64 sumblocks = 0;
+  int64 sumbytes = 0;
   for(int i=0;i<sd.rb.getsize();i++) {
-    sumblocks += sd.v_databuffer[i].blocks;
+    sumblocks += sd.v_databuffer[i].blockcount;
     sumbytes  += sd.v_databuffer[i].bytes;
   }
   if(g_debug) cerr << "Blocks processed " << sumblocks 
             << ", bytes = " << sumbytes
-            << " (" << fixed << setprecision(2) << sumbytes/1024.0/1024 << " MiB)" << endl;
+            << " (" << std::fixed << std::setprecision(2) << sumbytes/1024.0/1024 << " MiB)" << endl;
   if(g_abort) {
     stagingdb.close();
     Database::deletedb(parameters.stagingname); // delete invalid database if we were interrupted
   }
   resetTrap();
 }
-

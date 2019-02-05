@@ -9,17 +9,11 @@
 
 #include <iostream>
 #include <iomanip>
-#include <sstream>
 #include <fstream>
-#include <cstring>
-#include <chrono>
-#include <iomanip>
+#include <sstream>
 
 #include <unistd.h>
-#include <limits.h>
 #include <sys/stat.h>
-#include <sys/types.h>
-#include <stdio.h>
 #include <sys/statvfs.h>
 #include <pwd.h>
 #include <getopt.h>
@@ -30,13 +24,17 @@
 
 using std::string;
 
-sig_atomic_t g_abort;
-extern bool g_debug;
+sig_atomic_t g_abort; // signal other threads we've aborted
+extern bool g_debug;  // debug flag
 
 // show line and filename (using #define debug macro)
 void debugMsg(const char* file, int line) {
   std::cout << file <<", line " << line << "\t" << std::endl << std::flush;
 }
+
+/*******************************************************************************
+ * String functions
+ ******************************************************************************/
 
 // convert a string to uppercase (inplace)
 void toUpper(char *s) {
@@ -54,37 +52,6 @@ void toUpper(string& str) {
   str = buf;
 }
 
-// Test if file exists (and readable?)
-int fileExists(const char * fn) {
-  std::ifstream f(fn);
-  if(!f.fail()) return 1;
-  return 0;
-}
-
-off_t fileSize(const char *filename) {
-  struct stat st; 
-  if (stat(filename, &st) == 0)
-    return st.st_size;
-  return -1; 
-}
-
-// stopwatch - get lap time
-const ulong Stopwatch::diff() const {
-  return std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
-}
-
-// stopwatch - show time as seconds, format #.##
-const string Stopwatch::seconds() const {
-  return toString((float)diff()/1000000,2);
-}
-
-// stopwatch - show time in microsec
-const string Stopwatch::runtime() const {
-  std:: stringstream ss;
-  ss << "runtime " << diff() << " microsec (" << seconds() << " s)";
-  return ss.str();
-}
-
 // search and replace within string
 void searchReplace(string& source, string const& find, string const& replace) {
   for(string::size_type i = 0; (i = source.find(find, i)) != string::npos;) {
@@ -93,8 +60,48 @@ void searchReplace(string& source, string const& find, string const& replace) {
   }
 }
 
+// Test if string is digits only
+bool isNum(const string& s) {
+  char* p;
+  strtol(s.c_str(), &p, 10);
+  return *p == 0;
+}
+
+/*******************************************************************************
+ * System related
+ ******************************************************************************/
+
+// Test if file exists (and readable?)
+int fileExists(const char * fn) {
+  std::ifstream f(fn);
+  if(!f.fail()) return 1;
+  return 0;
+}
+
+// return filesize
+off_t fileSize(const char *filename) {
+  struct stat st; 
+  if (stat(filename, &st) == 0)
+    return st.st_size;
+  return -1; 
+}
+
+// return dir part of filename
+const string dirName(const string& in) {
+  string dir;
+  dir = in.substr(0,in.find_last_of("/")) + "/";
+  return dir;  
+}
+
+// get filesystem free in MiB
+long fileSystemFree(const char* path) {
+  struct statvfs stat;
+  if (statvfs(path, &stat) != 0) return -1;
+  return (stat.f_bsize * stat.f_bavail)/1048576;
+}
+
 // seconds since 1-1-1970
-ulong epoch() {
+int64 epoch() {
   return std::chrono::system_clock::now().time_since_epoch().count()/1000000000;
 }
 
@@ -127,64 +134,53 @@ const string& homeDir() {
   return homedir;
 }
 
-const string dirName(const string& in) {
-  string dir;
-  dir = in.substr(0,in.find_last_of("/")) + "/";
-  return dir;  
-}
-
-// get filesystem free in MiB
-long fileSystemFree(const char* path) {
-  struct statvfs stat;
-  if (statvfs(path, &stat) != 0) return -1;
-  return (stat.f_bsize * stat.f_bavail)/1048576;
-}
-
-// Stringarray functions
-
-// Add a string to the array
-StringArray& StringArray::operator+=(const string& s) {
-  v_string.push_back(s);
-  return *this;
-}
-
-// Add a string to the array (converted from ulong)
-StringArray& StringArray::operator+=(const ulong var) {
-  v_string.push_back(toString(var,0));
-  return *this;
-}
-
-// Return element i in string
-const string& StringArray::operator[](int i) {
-  if(i>=v_string.size()) 
-    throw ERROR("Index out of range");
-  return v_string[i];
-}
-
-// Dump the entire array to ostream
-std::ostream& operator<<(std::ostream& stream, StringArray& s) {
-  for(std::vector<string>::iterator i = s.v_string.begin(); i != s.v_string.end(); ++i)
-    stream << *i << std::endl;
-  return stream;
-}
-
-// Test if string is digits only
-bool isNum(const string& s) {
-  char* p;
-  strtol(s.c_str(), &p, 10);
-  return *p == 0;
-}
-
 // Get number of cpu cores
 int cpuCount() {
   return sysconf(_SC_NPROCESSORS_ONLN);
 }
 
+/*******************************************************************************
+ * Stopwatch - a timer class that keeps track of time in microseconds
+ ******************************************************************************/
+
+// stopwatch - get lap time
+const int64 Stopwatch::diff() const {
+  return std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+}
+
+// stopwatch - show time as seconds, format #.##
+const string Stopwatch::seconds() const {
+  return toString((float)diff()/1000000,2);
+}
+
+// stopwatch - show time in microsec
+const string Stopwatch::runtime() const {
+  std:: stringstream ss;
+  ss << "runtime " << diff() << " microsec (" << seconds() << " s)";
+  return ss.str();
+}
 
 /*******************************************************************************
  * LongOptions class functions
  ******************************************************************************/
-  
+
+LongOptions::LongOptions() {
+  val = 1024;
+  p_longopts = NULL; 
+}
+
+LongOptions::~LongOptions() {
+  if(p_longopts!=NULL) delete p_longopts;
+}
+
+// add a command line option, using various parameter types
+// each add function adds an option to the list
+// name: the (long) name of the parameter i.e. --name
+// c:    if there is a shorthand (-x) then provide the ascii char, else 0
+// p:    long option parameter ("" if none)
+// var:  a variable of type bool|int|int64|string|function to be used with the option
+// desc: short help description of the parameter
+
 void LongOptions::add(const char* name, char c, const char* p, bool&  v, const char* desc) {
   opts.push_back( (Option) { name, c?c:++val, p, desc } );
   opts.back().p_bool = &v;
@@ -195,9 +191,9 @@ void LongOptions::add(const char* name, char c, const char* p, int&   v, const c
   opts.back().p_int = &v;
 }
 
-void LongOptions::add(const char* name, char c, const char* p, ulong& v, const char* desc) {
+void LongOptions::add(const char* name, char c, const char* p, int64& v, const char* desc) {
   opts.push_back( (Option) { name, c?c:++val, p, desc } );
-  opts.back().p_ulong = &v;
+  opts.back().p_int64 = &v;
 }
 
 void LongOptions::add(const char* name, char c, const char* p, string& v, const char* desc) {
@@ -210,58 +206,65 @@ void LongOptions::add(const char* name, char c, const char* p, void (*f)(), cons
   opts.back().func = f;
 }
 
+// Print short help (when using -h)
 void LongOptions::printhelp(std::ostream& os) {
   for(int i=0;i<opts.size();i++) {
     string shortp, longp;
     if(opts[i].val<255) shortp = string("-") + string(1, opts[i].val) + ", ";
-    longp = string("--") + opts[i].name + " " + opts[i].optname;
+    longp = string("--") + opts[i].name + " " + opts[i].optdesc;
     os << std::setw(4) << std::left << shortp
-       << std::setw(22) << std::left << longp
+       << std::setw(23) << std::left << longp
        << std::left << opts[i].desc
        << std::endl;
   }
 }
 
+// Print man page section (--mandump)
 void LongOptions::printman(std::ostream& os) {
   for(int i=0;i<opts.size();i++) {
     string shortp, longp;
     if(opts[i].val<255) shortp = string("-") + string(1, opts[i].val) + ", ";
-    longp = string("--") + opts[i].name + " " + opts[i].optname;
+    longp = string("--") + opts[i].name + " " + opts[i].optdesc;
     os << ".TP\n.B \\" << shortp << longp
        << "\n" << opts[i].desc << "\n";
   }
   os << ".P\n";
 }
 
-const option* LongOptions::long_opts() {
-  option* o = new option[opts.size()+1];
+// Create option* array for getopt_long from opts array
+void LongOptions::longopts_init() {
+  if(p_longopts!=NULL) return;
+  p_longopts = new option[opts.size()+1];
   for(int i=0; i<opts.size(); i++) {
     option x = (option) { opts[i].name, hasarg(i), NULL, opts[i].val};
-    o[i] = x;
+    p_longopts[i] = x;
   }
-  o[opts.size()] = (option) { 0,0,0,0 };
-  return o;
+  p_longopts[opts.size()] = (option) { 0,0,0,0 };
 }
 
+// parse options
 int LongOptions::parse(int argc, char** argv) {
+  longopts_init();
   int c;
+  // create opt string
   string optstr = "+h";
   for(int i=0;i<opts.size();i++) {
     if(opts[i].val<255) {
       optstr += opts[i].val;
-      if(strlen(opts[i].optname)) optstr+=":";
+      if(strlen(opts[i].optdesc)) optstr+=":";
     }
   }
-  while ((c = getopt_long(argc, argv, optstr.c_str(), long_opts(), NULL)) != -1) {
+  // walk through arguments and process
+  while ((c = getopt_long(argc, argv, optstr.c_str(), p_longopts, NULL)) != -1) {
     for(int i=0;i<opts.size();i++) {
       if(c=='?') throw ERROR("Invalid parameter");
       if(c==opts[i].val) {
-        if(opts[i].func)    { opts[i].func(); return 1; }
-        if(opts[i].p_bool)  { *opts[i].p_bool = true; }
-        if(!hasarg(i)) continue;
-        if(opts[i].p_ulong) { *opts[i].p_ulong = atol(optarg); }
-        if(opts[i].p_int)   { *opts[i].p_int = atol(optarg); }
-        if(opts[i].p_str)   { *opts[i].p_str = optarg; }
+        if(opts[i].func)    { opts[i].func(); return 1; }        // call void function
+        if(opts[i].p_bool)  { *opts[i].p_bool = true; }          // set boolean
+        if(!hasarg(i)) continue;                                 // no val -> do nothing
+        if(opts[i].p_int64) { *opts[i].p_int64 = atol(optarg); } // set unsigned long
+        if(opts[i].p_int)   { *opts[i].p_int = atol(optarg); }   // set int
+        if(opts[i].p_str)   { *opts[i].p_str = optarg; }         // set string
         break;
       }
     }
@@ -269,7 +272,10 @@ int LongOptions::parse(int argc, char** argv) {
   return 0;
 }
 
-// Signal Handler for SIGINT (i.e. ctrl-c)
+/*******************************************************************************
+ * Signal handlers for SIGINT (i.e. ctrl-c)
+ ******************************************************************************/
+
 void setabort(int sig_num) {
   signal(SIGINT, setabort);
   g_abort = true;  

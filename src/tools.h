@@ -13,10 +13,10 @@
 #include <string>
 #include <vector>
 #include <sstream>
-
-#include <stdlib.h> // rand
-
+#include <ostream>
 #include <string.h>
+
+#include "error.h"
 
 struct option;
 
@@ -45,15 +45,17 @@ void debugMsg(const char*, int); // show line and filename
 #define RELEASE ""
 #endif
 
-
+// int64 and uint64 are the basic type for qdda as it matches 64 bit integers of SQLite
+typedef uint64_t uint64;
+typedef int64_t  int64;
 
 /*******************************************************************************
  * String functions
  ******************************************************************************/
 
-bool isNum(const std::string& s);    // true if string only has digits
-void toUpper(char *str);        // convert a string to uppercase (inplace)
-void toUpper(std::string& str);      // same with string instead of char*
+bool isNum(const std::string& s); // true if string only has digits
+void toUpper(char *str);          // convert a string to uppercase (inplace)
+void toUpper(std::string& str);   // same with string instead of char*
 void searchReplace(std::string& src, std::string const& find, std::string const& repl); // global inplace search/replace within string
 
 // Print to string with precision N (float, double)
@@ -67,28 +69,26 @@ template <typename T> std::string toString(const T value, const int n = 2) {
  * Calculations
  ******************************************************************************/
 
-inline ulong square(ulong x)                 { return x * x; };
-inline int   maxint(int x, int y)            { return x>y?x:y; };
-inline int   minint(int x, int y)            { return x<y?x:y; };
-inline float safeDiv_float(float x, float y) { return (y==0) ? 0 : x / y; }  // safe divide (just returns 0 if div by zero)
-inline ulong safeDiv_ulong(ulong x, ulong y) { return (y==0) ? 0 : x / y; }  // same for ulong
-inline ulong divRoundUp(ulong x, ulong y)    { return (x%y) ? x/y+1 : x/y; } // long integer division but round up instead of round down
-inline uint64_t longRand()                   { return ((uint64_t)rand() << 32) + rand() ; }  // 64-bit ulong random
-
+inline int    maxint(int x, int y)            { return x>y?x:y; };
+inline int    minint(int x, int y)            { return x<y?x:y; };
+inline float  safeDiv_float(float x, float y) { return (y==0) ? 0 : x / y; }  // safe divide (just returns 0 if div by zero)
+inline int64  safeDiv_int64(int64 x, int64 y) { return (y==0) ? 0 : x / y; }  // same for int64
+inline int64  divRoundUp(int64 x, int64 y)    { return (x%y) ? x/y+1 : x/y; } // long integer division but round up instead of round down
+inline uint64 longRand()                      { return ((uint64)rand() << 32) + rand() ; }  // 64-bit random unsigned int
 
 /*******************************************************************************
  * System related info
  ******************************************************************************/
 
-int   cpuCount();        // return number of cpus (cores)
-ulong epoch();           // secs since 1970
-const char* hostName();  // system hostname
-const char* whoAmI();    // path to self
-const std::string& homeDir();
-const std::string  dirName(const std::string& file);   // return dir portion of filename, including '/'
-int   fileExists(const char * fn);           // return true if file exists
-long  fileSystemFree(const char* filename);  // filesystem free in MB for this file
-off_t fileSize(const char *filename);        // return size of file in bytes
+int   cpuCount();                                    // return number of cpus (cores)
+int64 epoch();                                       // secs since 1970
+const char* hostName();                              // system hostname
+const char* whoAmI();                                // path to self
+const std::string& homeDir();                        // User's home directory
+const std::string  dirName(const std::string& file); // return dir portion of filename, including '/'
+int   fileExists(const char * fn);                   // return true if file exists
+long  fileSystemFree(const char* filename);          // filesystem free in MB for this file
+off_t fileSize(const char *filename);                // return size of file in bytes
 
 void armTrap();   // interrupt handler, enable
 void resetTrap(); // disable
@@ -99,29 +99,60 @@ void resetTrap(); // disable
 
 class Stopwatch {
   std::chrono::high_resolution_clock::time_point t1,t2;
-  const ulong diff() const;
+  const int64 diff() const;
 public:
   Stopwatch()       { reset();}
   void reset()      { t1 = std::chrono::high_resolution_clock::now(); t2=t1;}          // reset timers
-  const ulong lap() { t2 = std::chrono::high_resolution_clock::now(); return diff(); } // save laptime and return diff
-  const std::string seconds() const;        // return seconds in #.## format
-  const std::string runtime() const;        // return runtime message
-  operator ulong()  { return diff(); } // returns saved laptime
+  const int64 lap() { t2 = std::chrono::high_resolution_clock::now(); return diff(); } // save laptime and return diff
+  operator int64()  { return diff(); } // returns saved laptime
+  const std::string seconds() const;   // return seconds in #.## format
+  const std::string runtime() const;   // return runtime message
 };
 
 /*******************************************************************************
- * StringArray - holds a variable number of strings (using std::vector)
+ * BoundedRange - a value guaranteed to be within min and max limits
  ******************************************************************************/
 
-class StringArray {
-  std::vector<std::string> v_string;
+// throw this if we get a range error
+class BoundedRange: public std::exception { };
+
+// Boundedval<int, 5, 10> is guaranteed to contain an int between 5 and 10
+template<typename T, int Tmin, int Tmax> class BoundedVal {
 public:
-  int size()    { return v_string.size(); }
-  StringArray& operator+=(const std::string& s);
-  StringArray& operator+=(const ulong);
-  const std::string& operator[](int i);
-  friend std::ostream& operator<< (std::ostream&, StringArray&);
+  BoundedVal() { val = Tmin ; }
+  operator T() { return val; }
+  int operator=(T in) {
+    if(in < Tmin || in > Tmax) throw BoundedRange();
+    val = in ; 
+  }
+private:
+  T val;
 };
+
+/*******************************************************************************
+ * SmartVector - a vector template with some additional operators & functions
+ * Not complete yet - work in progress
+ ******************************************************************************/
+
+template<typename T>
+class SmartVector {
+public:
+  void clear()                        { v.clear() ; }
+  void resize(size_t& s)              { v.resize(s); }
+  size_t size() const                 { return v.size(); }
+  T& operator+=(const T& i)           { v.push_back(i); return *this; }
+  SmartVector& operator<<(const T& i) { v.push_back(i); return *this; }
+  void print(std::ostream& os)        { for(int i=0; i<v.size(); i++) os << v[i] << std::endl; }
+  const T& operator[](int i) const {
+    if(i>=v.size()) throw ERROR("SmartVector: Index out of range");
+    return v[i];
+  };
+private:
+  std::vector<T> v;
+};
+
+typedef SmartVector<int>         IntArray;
+typedef SmartVector<std::string> StringArray;
 
 /*******************************************************************************
  * LongOptions - class that holds options for arguments processing
@@ -132,32 +163,33 @@ public:
 
 class LongOptions {
   struct Option {
-    const char*  name;
-    int          val;
-    const char*  optname;
-    const char*  desc;
-    int*         p_int;
-    ulong*       p_ulong;
-    bool*        p_bool;
-    std::string* p_str;
-    void (*func)();
+    const char*  name;    // long option name (--name)
+    int          val;     // unique option value (identifier)
+    const char*  optdesc; // description of option parameters
+    const char*  desc;    // help description
+    // option parameters (only one can be used, rest is 0/NULL)
+    int*         p_int;   // pointer to parameter (int)
+    int64*       p_int64; // pointer to parameter (unsigned long)
+    bool*        p_bool;  // pointer to parameter (bool)
+    std::string* p_str;   // pointer to parameter (string)
+    void (*func)();       // pointer to void function with no parameters
   };
 public:
-  LongOptions() { val = 1024; };
-  // each add function takes a variable, 
+  LongOptions();
+  ~LongOptions();
   void  add(const char* name, char c, const char* p, bool&        v, const char* desc);
   void  add(const char* name, char c, const char* p, int&         v, const char* desc);
-  void  add(const char* name, char c, const char* p, ulong&       v, const char* desc);
+  void  add(const char* name, char c, const char* p, int64&       v, const char* desc);
   void  add(const char* name, char c, const char* p, std::string& v, const char* desc);
   void  add(const char* name, char c, const char* p, void (*f)(),    const char* desc);
-  int   hasarg(int i) { return strlen(opts[i].optname)?1:0; }
+  int   hasarg(int i) { return strlen(opts[i].optdesc)?1:0; }
   void  printhelp(std::ostream& os);
   void  printman(std::ostream& os);
-  const option* long_opts();
   int   parse(int argc, char** argv);
 private:
   int val;
   std::vector<Option> opts;
+  option* p_longopts;
+  void longopts_init();
 };
 
-#undef string

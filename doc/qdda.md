@@ -1,7 +1,7 @@
 <HTML><HEAD>
 </HEAD><BODY>
 <H1>qdda</H1>
-Section: QDDA User Manual (1)<BR>Updated: 2018-03-24<BR><A HREF="#index">Index</A>
+Section: QDDA User Manual (1)<BR>Updated: 2019-01-31<BR><A HREF="#index">Index</A>
 <A HREF="http://localhosthttps://linux.die.net/man/1/man2html">Return to Main Contents</A><HR>
 
 <A NAME="lbAB">&nbsp;</A>
@@ -19,10 +19,8 @@ qdda - the quick &amp; dirty dedupe analyzer
 <B>qdda</B>
 checks files, data streams or block devices for duplicate blocks to estimate deduplication
 efficiency on dedupe capable storage systems, using key-value stores in SQLite,
-MD5 hashing and LZ4 compression.  It also estimates compression ratios for all-flash arrays
-XtremIO X1 and X2 as well as VMAX AFA (experimental).
-
-<P>
+MD5 hashing and LZ4 or DEFLATE compression. It also estimates compression ratios for all-flash arrays
+XtremIO X1 and X2 as well as VMAX All-flash / PowerMAX.
 <A NAME="lbAE">&nbsp;</A>
 <H2>IMPORTANT NOTES</H2>
 
@@ -30,14 +28,14 @@ XtremIO X1 and X2 as well as VMAX AFA (experimental).
 can create very large database files and generate lots of read I/O and heavy CPU load. Check the 
 <B>RESOURCE REQUIREMENTS</B>
 section before you start.
-<BR>
+
+The SQLite database file(s) (qdda.db) may be removed at any time using 'qdda --delete' or simply deleting the qdda.db file.
 
 For additional safety, run
 <B>qdda</B>
 as non-root user. See the 
 <B>SECURITY AND SAFETY</B>
 section for details on how to do this.
-
 <A NAME="lbAF">&nbsp;</A>
 <H2>OPTIONS</H2>
 
@@ -66,12 +64,12 @@ Don't show progress indicator or intermediate results
 <DT><B>-b, --bandwidth &lt;mb/s&gt;</B>
 <DD>
 Throttle bandwidth in MB/s (default 200, 0=disable)
-<DT><B>--array &lt;id|def&gt;</B>
+<DT><B>--array &lt;list|array&gt;</B>
 <DD>
-set array type or custom definition &lt;x1|x2|vmax1|definition&gt;
-<DT><B>-l, --list </B>
+show/set arraytype or custom (see man page section STORAGE ARRAYS)
+<DT><B>--compress &lt;method&gt;</B>
 <DD>
-list supported array types and custom definition options
+set compression method &lt;none|lz4|deflate&gt;[:interval]
 <DT><B>-x, --detail </B>
 <DD>
 Detailed report (file info and dedupe/compression histograms)
@@ -117,6 +115,9 @@ set all refcounts to 1
 <DT><B>--mandump </B>
 <DD>
 dump raw manpage to stdout
+<DT><B>--bashdump </B>
+<DD>
+dump bash_completion script to stdout
 <DT><B>--demo </B>
 <DD>
 show quick demo
@@ -166,31 +167,68 @@ algorithm which has a slightly lower compression ratio compared to LZ4, but clai
 This means the qdda results are slightly over-optimistic. The differences are too small however to be a major issue.
 <DT>XtremIO&nbsp;X2&nbsp;(--array=x2)&nbsp;(default)<DD>
 With the X2, the internal blocksize was increased to 16KiB and many more (15) compression bucket sizes are available: 1K up to 16K with
-1K increments, where 15K is missing because in XtremIO X2 architecture it would allocate the same capacity as 16K uncompressed. 
+1K increments, where 14K is missing because in XtremIO X2 architecture it would allocate the same capacity as 15K uncompressed. 
 The larger block size and more variations in buckets makes XtremIO compression much more effective. 
 There is still a slight difference in compression ratio due to LZ4 versus the native XtremIO algorithm.
-<DT>VMAX&nbsp;All-Flash&nbsp;(--array=vmax1)<DD>
-VMAX data reduction estimates are currently 
-<B>EXPERIMENTAL.</B>
-<BR>
-
-VMAX compresses data using 128K chunks which get compressed in bucket sizes from 8K up to 128K with 8K increments. Not all bucket sizes are
-available at initial configuration and VMAX changes the compression layout dynamically and also avoids compression
-for up to 20% of all data, based on workload and data profile. This makes it hard for qdda to give reasonable estimates which is why
-it is marked as EXPERIMENTAL for now. The output of qdda shows the results at most ideal circumstances (all data gets deduped and
-compressed always). Future versions may improve on accuracy.
+<DT>VMAX&nbsp;(--array=vmax)<DD>
+VMAX All-Flash
+VMAX compresses/dedupes data using 128K chunks which get compressed in bucket sizes from 8K up to 128K with 8K increments.
+The compression is initially performed by splitting 128K into 4 32K chunks, but if the data is cold for a while it can get
+re-compressed on the full 128K block. Not all bucket sizes are available at initial configuration and 
+VMAX changes the compression layout dynamically. The compression algorithm in VMAX is LZS which is similar to LZ4 so
+<B>qdda</B>
+uses LZ4 to estimate VMAX compression.
+It also can delay or avoid compression at all for up to 20% of all data to avoid overhead for hot data blocks.
+As the data reduction rate is not immediately known or deterministic, qdda assumes the final state scenario where
+128K blocks get fully compressed again and deduped
+so the qdda result reflects the optimal end result for idle data.
+<DT>PowerMAX&nbsp;(--array=pmax)<DD>
+PowerMAX uses DEFLATE (zlib) compression, on 128K blocks split into buckets of 8K .. 128K like VMAX.
+DEFLATE achieves a higher compression ratio but at a higher CPU overhead.
 <DT>custom&nbsp;(--array=&lt;custom&nbsp;definition&gt;)<DD>
-Specify a string with array=name=&lt;name&gt;,bs=&lt;blocksize_kb&gt;,buckets=&lt;size1+size2....&gt;
+Specify a string with array=custom:&lt;blocksize&gt;:&lt;size1,size2....&gt;
 <BR>
 
-example: qdda --array=name=foo,bs=64,buckets=8+16+32+48+64
+example: qdda --array=custom:64:8,16,32,48,64
+<BR>
+
+for a custom array with blocksize 64K, and buckets of 8, 16, 32, 48 and 64K
 
 The compress and hash algorithms are slightly different from these actual arrays
 and the results are a (close) approximation of the real array data reduction.
-Currently qdda only uses LZ4 (default) compression.
+Currently qdda only uses LZ4 (default) or DEFLATE (ZLIB) compression.
 
 </DL>
 <A NAME="lbAH">&nbsp;</A>
+<H2>COMPRESSION</H2>
+
+Currently qdda supports LZ4 as well as ZLIB (DEFLATE) compression.
+<BR>
+
+LZ4 is a very fast, lightweight compression algorithm with reasonable compression ratios. My <A HREF="mailto:i5-4440@3.1GHz">i5-4440@3.1GHz</A> can
+compress roughly at 500MB/s per core.
+DEFLATE offers higher compression ratios but at the expense of much heavier CPU load. The same i5-4440 can do
+roughly 55MB/s per core.
+
+Both compression algorithms use their default compression level.
+
+For this reason, when using DEFLATE a default, random sample interval of 20 is used so that on average 1 out of 20 blocks
+gets sampled. The end compression ratio is then calculated from the sampled values.
+
+You can change the default algorithm and interval using the
+<B>--compress </B>
+option:
+<BR>
+
+--compress &lt;none|lz4|deflate&gt;[:interval]
+<BR>
+
+where interval represents the average number of non-sampled vs sampled blocks i.e. an interval of 20
+means on average one out of every 20 blocks gets sampled (inverse of the sample rate).
+<BR>
+
+When selecting 'none' no compression is done, only dedupe analysis.
+<A NAME="lbAI">&nbsp;</A>
 <H2>ERRORS</H2>
 
 <B>qdda</B>
@@ -199,20 +237,22 @@ has basic error handling. Most errors result in simply aborting with an error me
 
 Currently aborting qdda with ctrl-c may result in corruption of the SQLite QDDA database.
 <P>
-<A NAME="lbAI">&nbsp;</A>
+<A NAME="lbAJ">&nbsp;</A>
 <H2>EXAMPLE</H2>
 
 <DL COMPACT>
-<DT><B>qdda compress:128,4 compress:256,2 compress:512 zero:512</B>
+<DT><B>qdda -d /tmp/demo compress:128,4 compress:256,2 compress:512 zero:512</B>
 <DD>
 Analyze a compressible reference test data set with 128Mx4, 256Mx2, 512x1 and 512M zeroed.
 
 <B>Example output</B>
 <PRE>
-Database info (/home/bart/qdda.db):
-database size       = 1.12 MiB
-array id            = XtremIO X2
-blocksize           = 16 KiB
+Database info (/tmp/demo.db):
+database size       =        1.12 MiB
+array id            =  XtremIO X2
+blocksize           =          16 KiB
+compression         =         lz4
+sample percentage   =      100.00 %
 
 Overview:
 total               =     2048.00 MiB (    131072 blocks)
@@ -220,14 +260,15 @@ free (zero)         =      512.00 MiB (     32768 blocks)
 used                =     1536.00 MiB (     98304 blocks)
 dedupe savings      =      640.00 MiB (     40960 blocks)
 deduped             =      896.00 MiB (     57344 blocks)
-compressed          =      451.93 MiB (     49.56 %)
-allocated           =      483.25 MiB (     30928 blocks)
+compressed          =      451.62 MiB (     46.08 %)
+allocated           =      483.09 MiB (     30918 blocks)
 
 Details:
 used                =     1536.00 MiB (     98304 blocks)
-compressed raw      =      775.41 MiB (     49.52 %)
 unique data         =      512.00 MiB (     32768 blocks)
 non-unique data     =     1024.00 MiB (     65536 blocks)
+compressed raw      =      772.98 MiB (     49.67 %)
+compressed net      =      451.62 MiB (     49.59 %)
 
 Summary:
 percentage used     =       75.00 %
@@ -237,7 +278,7 @@ compression ratio   =        1.85
 thin ratio          =        1.33
 combined            =        4.24
 raw capacity        =     2048.00 MiB
-net capacity        =      483.25 MiB
+net capacity        =      483.09 MiB
 </PRE>
 
 </DL>
@@ -246,15 +287,19 @@ net capacity        =      483.25 MiB
 
 <B>Explanation</B>
 <DL COMPACT>
-<DT>Database&nbsp;size<DD>
-Size of the primary SQLite databse on disk
-<DT>Array&nbsp;ID<DD>
+<DT>database&nbsp;size<DD>
+Size of the primary SQLite database on disk
+<DT>array&nbsp;ID<DD>
 Name of array for which dedupe and compress estimates are calculated. Can be a custom string.
-<DT>Blocksize<DD>
+<DT>blocksize<DD>
 Blocksize on which hashes and compression sizes are calculated
-<DT>Total<DD>
+<DT>compression<DD>
+Compression algorithm used
+<DT>sample<DD>
+Percentage of all blocks that were sampled for compression ratio. Equals 1/interval.
+<DT>total<DD>
 Total scanned blocks
-<DT>Free<DD>
+<DT>free<DD>
 Free (zero) blocks
 <DT>used<DD>
 Used (non-zero) blocks
@@ -266,13 +311,16 @@ Blocks required after dedupe
 Capacity after compressing (deduped) blocks i.e.sum of compressed size of all blocks after dedupe
 <DT>allocated<DD>
 Capacity after allocating compressed blocks into buckets. This is the required capacity on an inline dedupe/compress capable storage array
-<DT>compressed&nbsp;raw<DD>
-Capacity required for compressing all raw data (before dedupe) i.e. sum of compressed size of all scanned 
-blocks
 <DT>unique&nbsp;data<DD>
 Blocks that are unique (cannot be deduped)
 <DT>non-unique&nbsp;data<DD>
 Blocks that appear at least 2x (can be deduped)
+<DT>compressed&nbsp;raw<DD>
+Capacity required for compressing all raw data (before dedupe) 
+i.e. sum of compressed size of all scanned blocks
+<DT>compressed&nbsp;net<DD>
+Capacity required for compressing all deduped data (after dedupe)
+i.e. sum of compressed size of all deduped blocks
 <DT>percentage&nbsp;used<DD>
 Percentage of all raw blocks that are non-zero
 <DT>percentage&nbsp;free<DD>
@@ -298,10 +346,10 @@ Show detailed histograms from the database
 <PRE>
 File list:
 file      blksz     blocks         MiB date               url                                                                             
-1         16384      32768         512 20180420_0922      workstation:/dev/zero                                                           
-2         16384       8192         128 20180420_0922      workstation:/dev/urandom                                                        
-3         16384      16384         256 20180420_0922      workstation:/dev/urandom                                                        
-4         16384      32768         512 20180420_0922      workstation:/dev/urandom                                                        
+1         16384       8192         128 20190204_0944      workstation:/dev/urandom                                                        
+2         16384      16384         256 20190204_0944      workstation:/dev/urandom                                                        
+3         16384      32768         512 20190204_0944      workstation:/dev/zero                                                           
+4         16384      32768         512 20190204_0944      workstation:/dev/urandom                                                        
 
 Dedupe histogram:
 dup            blocks         perc          MiB
@@ -311,24 +359,24 @@ dup            blocks         perc          MiB
 4               32768        25.00       512.00
 Total:         131072       100.00      2048.00
 
-Compression Histogram (XtremIO X2): 
-size          buckets         perc       blocks          MiB
-1                3360         5.86          210         3.28
-2                3670         6.40          459         7.17
-3                3526         6.15          662        10.34
-4                3601         6.28          901        14.08
-5                3629         6.33         1135        17.73
-6                3621         6.31         1358        21.22
-7                3498         6.10         1531        23.92
-8                3474         6.06         1737        27.14
-9                3530         6.16         1986        31.03
-10               3582         6.25         2239        34.98
-11               3582         6.25         2463        38.48
-12               3533         6.16         2650        41.41
-13               3651         6.37         2967        46.36
-15               7319        12.76         6862       107.22
-16               3768         6.57         3768        58.88
-Total:          57344       100.00        30928       483.25
+Compression Histogram (2): 
+size          buckets       RawMiB         perc       blocks                  MiB
+1                3350        52.34         5.84          210                 3.28
+2                3642        56.91         6.35          456                 7.12
+3                3568        55.75         6.22          669                10.45
+4                3648        57.00         6.36          912                14.25
+5                3607        56.36         6.29         1128                17.62
+6                3510        54.84         6.12         1317                20.58
+7                3603        56.30         6.28         1577                24.64
+8                3415        53.36         5.96         1708                26.69
+9                3516        54.94         6.13         1978                30.91
+10               3532        55.19         6.16         2208                34.50
+11               3572        55.81         6.23         2456                38.38
+12               3539        55.30         6.17         2655                41.48
+13               3682        57.53         6.42         2992                46.75
+15               7322       114.41        12.77         6865               107.27
+16               3838        59.97         6.69         3838                59.97
+Total:          57344       896.00       100.00        30969               483.89
 </PRE>
 
 
@@ -355,14 +403,14 @@ the defined bucket sizes for the array. For example XtremIO X1 has bucket sizes 
 2048 bytes will go into the 2K bucket, sizes between 2049 and 4096 will go into bucket 4K and everything else into 8K.
 <BR>
 
-The compression histogram shows the distribution of bucket sizes. In this case for XtremIO X2 it shows that 3360 blocks were compressed
-into 1K buckets. The array has a blocksize of 16K so in order to store 3360 1K buckets we need 210 16K blocks (3360*1/16).
+The compression histogram shows the distribution of bucket sizes. In this case for XtremIO X2 it shows that 3350 blocks were compressed
+into 1K buckets. The array has a blocksize of 16K so in order to store 3350 1K buckets we need 210 16K blocks (3350*1/16).
 <BR>
 
-3474 blocks were compressed into the 8K bucket, and this requires 1737 blocks to be allocated (3474*8/16).
+3415 blocks were compressed into the 8K bucket, and this requires 1708 blocks to be allocated (3415*8/16).
 <BR>
 
-3768 blocks could not be compressed in less than 16K so these are stored 1:1.
+3838 blocks could not be compressed in less than 16K so these are stored 1:1.
 
 <B>qdda --tophash 5</B>
 
@@ -424,11 +472,12 @@ dd bs=16K status=none count=1 if=/dev/sda skip=181 | md5sum
 
 <P>
 </DL>
-<A NAME="lbAJ">&nbsp;</A>
+<A NAME="lbAK">&nbsp;</A>
 <H2>COMBINING MULTIPLE SCANS</H2>
 
-By default, when scanning data, qdda deletes the existing database and creates a new one. Using the --append option you can
-keep existing data and add more file(s) to the existing database:
+By default, when scanning data, qdda deletes the existing database and creates a new one. 
+Using the --append option you can keep existing data
+and add more file(s) to the existing database:
 
 qdda /dev/&lt;disk1&gt;
 qdda --append /dev/&lt;disk2&gt;
@@ -443,8 +492,12 @@ qdda --import db1.db
 qdda --import db2.db
 </PRE>
 
-<P>
-<A NAME="lbAK">&nbsp;</A>
+The newly created database qdda.db will contain data from both db1 and db2.
+
+The combined databases can be gathered from different servers (by copying 
+the qdda.db files to one central location) so this
+allows one to create a data reduction analysis across multiple hosts.
+<A NAME="lbAL">&nbsp;</A>
 <H2>RESOURCE REQUIREMENTS</H2>
 
 <B>Storage capacity</B>
@@ -522,7 +575,7 @@ system with 8 cores reading 2 files, the amount of buffers = 2 + 8 + 32 = 42 MiB
 
 qdda also requires additional memory for SQLite, etc. but the total required memory usually fits in less than 100MiB.
 <P>
-<A NAME="lbAL">&nbsp;</A>
+<A NAME="lbAM">&nbsp;</A>
 <H2>EXPLANATION</H2>
 
 How qdda works:
@@ -549,16 +602,17 @@ section.
 <P>
 Some All-Flash arrays use &quot;bucket&quot; compression to achieve high throughput, low overhead and good compression. 
 qdda simulates compression uzing LZ4 compression. LZ4 has very high throughput and the compression ratios
-are very close to what All-Flash Arrays can achieve.
-<P>
+are very close to what All-Flash Arrays can achieve. For VMAX/Powermax, DEFLATE (zlib) is used which is much slower
+but achieves a higher compression rate (everything is a tradeoff).
 
 <B>Bucket Compression:</B>
+<P>
 If an array would store compressed blocks by just concatenation of the blocks (such as with file compression tools like ZIP or GZIP),
 random access would be very poor as the overhead for finding block offsets would be very high. Also, modification of a compressed block
 would cause severe fragmentation and other issues. For this reason, AFA's like XtremIO use &quot;bucket compression&quot;. For example,
 XtremIO has bucket sizes of 1K to 16K with 1K steps. Say an incoming 16K block compresses to a size of 4444 bytes. The smallest bucket
 where this would fit into is the 5K bucket which means the remaining 676 bytes in the bucket are not used. This causes a slightly lower
-compress ratio but vastly improves performance and reduces fragmentation and partial write issues.
+compress ratio (16384:5120 vs 16384:4444) but vastly improves performance and reduces fragmentation and partial write issues.
 <P>
 
 <B>Throttling:</B>
@@ -574,7 +628,7 @@ This prevents accidentally starving IO on a production host. Disable throttling 
 The default blocksize is 16KiB (XtremIO X2). The block size is stored in metadata and only datasets
 with matching blocksizes can be merged or combined. The maximum blocksize is currently 128K, the minimum is 1K.
 <P>
-<A NAME="lbAM">&nbsp;</A>
+<A NAME="lbAN">&nbsp;</A>
 <H2>ACCURACY</H2>
 
 <B>Notes on hash algorithm</B>
@@ -618,7 +672,7 @@ Some arrays do post-processing which also results in not all data being compress
 <B>qdda</B>
 currently ignores these effects and produces results for all data as if it was compressed and deduped immediately (inline).
 <P>
-<A NAME="lbAN">&nbsp;</A>
+<A NAME="lbAO">&nbsp;</A>
 <H2>PERFORMANCE</H2>
 
 <B>qdda</B>
@@ -635,9 +689,10 @@ a rough idea of your system's capabilities by running the --cputest option which
 <PRE>
 *** Synthetic performance test, 1 thread ***
 Initializing:          65536 blocks, 16k (1024 MiB)
-Hashing:             1799584 usec,     596.66 MB/s,    36417.30 rows/s
-Compressing:         2412561 usec,     445.06 MB/s,    27164.49 rows/s
-DB insert:             52301 usec,   20530.04 MB/s,  1253054.38 rows/s
+Hashing:          1842670         usec, 582.71     MB/s, 35565.78    rows/s
+Compress DEFLATE: 32676647        usec, 32.86      MB/s, 2005.59     rows/s
+Compress LZ4:     2503945         usec, 428.82     MB/s, 26173.10    rows/s
+DB insert:        51219           usec, 20963.74   MB/s, 1279525.12  rows/s
 </PRE>
 
 
@@ -673,11 +728,11 @@ or setting SQLITE_TMPDIR (also helps if you run out of diskspace).
 You can avoid the merge (join) phase and delay it to a later moment using the &quot;--nomerge&quot; (no report) option. 
 Ideal if you scan on a slow server with limited space and you want to do the heavy lifting on a faster host later.
 <P>
-<A NAME="lbAO">&nbsp;</A>
+<A NAME="lbAP">&nbsp;</A>
 <H2>CONFIG FILES</H2>
 
 None, everything is contained in the SQLite database and command line options
-<A NAME="lbAP">&nbsp;</A>
+<A NAME="lbAQ">&nbsp;</A>
 <H2>ENVIRONMENT VARIABLES</H2>
 
 <DL COMPACT>
@@ -693,7 +748,7 @@ if set, is used for the temporary tables such as used for sorting and joining
 if SQLITE_TMPDIR is not set, TMPDIR is used for temp tables
 <P>
 </DL>
-<A NAME="lbAQ">&nbsp;</A>
+<A NAME="lbAR">&nbsp;</A>
 <H2>SECURITY AND SAFETY</H2>
 
 <B>qdda</B>
@@ -724,7 +779,7 @@ This gives &lt;user&gt; read-only access without altering any of the existing ow
 typically be reset at next reboot or through <A HREF="http://localhosthttps://linux.die.net/man/1/man2html?7+udev">udev</A>(7).
 You need to have ACL enabled on the file system containing /dev/ and the setfacl tool installed.
 <P>
-<A NAME="lbAR">&nbsp;</A>
+<A NAME="lbAS">&nbsp;</A>
 <H2>OTHER PLATFORMS</H2>
 
 <B>qdda</B>
@@ -745,7 +800,7 @@ source host: (as root)
 cat /dev/&lt;disk&gt; | nc targethost 19000
 
 <P>
-<A NAME="lbAS">&nbsp;</A>
+<A NAME="lbAT">&nbsp;</A>
 <H2>KNOWN ISSUES</H2>
 
 Database journaling and synchronous mode are disabled for performance reasons. This means the internal database may be corrupted if qdda is ended
@@ -764,12 +819,12 @@ Dumping multiple devices to a single pipe (i.e. cat /dev/sda /dev/sdb | qdda) ma
 <P>
 <P>
 <P>
-<A NAME="lbAT">&nbsp;</A>
+<A NAME="lbAU">&nbsp;</A>
 <H2>SEE ALSO</H2>
 
-<A HREF="http://localhosthttps://linux.die.net/man/1/man2html?1+lz4">lz4</A>(1), <A HREF="http://localhost/cgi-bin/man/man2html?1+md5">md5</A>(1), <A HREF="http://localhost/cgi-bin/man/man2html?1+sqlite3">sqlite3</A>(1), <A HREF="http://localhost/cgi-bin/man/man2html?1+mkfifo">mkfifo</A>(1), <A HREF="http://localhost/cgi-bin/man/man2html?1+nc">nc</A>(1), <A HREF="http://localhost/cgi-bin/man/man2html?7+udev">udev</A>(7), <A HREF="http://localhost/cgi-bin/man/man2html?1+setfacl">setfacl</A>(1)
+<A HREF="http://localhosthttps://linux.die.net/man/1/man2html?1+lz4">lz4</A>(1), <A HREF="http://localhost/cgi-bin/man/man2html?3+zlib">zlib</A>(3), <A HREF="http://localhost/cgi-bin/man/man2html?1+md5">md5</A>(1), <A HREF="http://localhost/cgi-bin/man/man2html?1+sqlite3">sqlite3</A>(1), <A HREF="http://localhost/cgi-bin/man/man2html?1+mkfifo">mkfifo</A>(1), <A HREF="http://localhost/cgi-bin/man/man2html?1+nc">nc</A>(1), <A HREF="http://localhost/cgi-bin/man/man2html?7+udev">udev</A>(7), <A HREF="http://localhost/cgi-bin/man/man2html?1+setfacl">setfacl</A>(1)
 <P>
-<A NAME="lbAU">&nbsp;</A>
+<A NAME="lbAV">&nbsp;</A>
 <H2>AUTHOR</H2>
 
 Written by Bart Sjerps <I><A HREF="http://bartsjerps.wordpress.com">http://bartsjerps.wordpress.com</A></I>
@@ -780,7 +835,7 @@ If you have suggestions for improvements in this tool, please send them along vi
 
 The source code and downloadable binaries are available from <I><A HREF="https://github.com/outrunnl/qdda">https://github.com/outrunnl/qdda</A></I> 
 <P>
-<A NAME="lbAV">&nbsp;</A>
+<A NAME="lbAW">&nbsp;</A>
 <H2>COPYRIGHT</H2>
 
 Copyright © 2018 Bart Sjerps,  License GPLv3+: GNU GPL version 3 or later &lt;<A HREF="http://gnu.org/licenses/gpl.html">http://gnu.org/licenses/gpl.html</A>&gt;.
@@ -788,7 +843,7 @@ Copyright © 2018 Bart Sjerps,  License GPLv3+: GNU GPL version 3 or later &lt;<
 
 This is free software: you are free to change and redistribute it.  There is NO WARRANTY, to the extent permitted by law.
 <P>
-<A NAME="lbAW">&nbsp;</A>
+<A NAME="lbAX">&nbsp;</A>
 <H2>DISCLAIMER</H2>
 
 This software is provided &quot;as is&quot; and follows the licensing and warranty guidelines 
@@ -805,27 +860,28 @@ responsible for any problems you may encounter with this software.
 <DT><A HREF="#lbAE">IMPORTANT NOTES</A><DD>
 <DT><A HREF="#lbAF">OPTIONS</A><DD>
 <DT><A HREF="#lbAG">STORAGE ARRAYS</A><DD>
-<DT><A HREF="#lbAH">ERRORS</A><DD>
-<DT><A HREF="#lbAI">EXAMPLE</A><DD>
-<DT><A HREF="#lbAJ">COMBINING MULTIPLE SCANS</A><DD>
-<DT><A HREF="#lbAK">RESOURCE REQUIREMENTS</A><DD>
-<DT><A HREF="#lbAL">EXPLANATION</A><DD>
-<DT><A HREF="#lbAM">ACCURACY</A><DD>
-<DT><A HREF="#lbAN">PERFORMANCE</A><DD>
-<DT><A HREF="#lbAO">CONFIG FILES</A><DD>
-<DT><A HREF="#lbAP">ENVIRONMENT VARIABLES</A><DD>
-<DT><A HREF="#lbAQ">SECURITY AND SAFETY</A><DD>
-<DT><A HREF="#lbAR">OTHER PLATFORMS</A><DD>
-<DT><A HREF="#lbAS">KNOWN ISSUES</A><DD>
-<DT><A HREF="#lbAT">SEE ALSO</A><DD>
-<DT><A HREF="#lbAU">AUTHOR</A><DD>
-<DT><A HREF="#lbAV">COPYRIGHT</A><DD>
-<DT><A HREF="#lbAW">DISCLAIMER</A><DD>
+<DT><A HREF="#lbAH">COMPRESSION</A><DD>
+<DT><A HREF="#lbAI">ERRORS</A><DD>
+<DT><A HREF="#lbAJ">EXAMPLE</A><DD>
+<DT><A HREF="#lbAK">COMBINING MULTIPLE SCANS</A><DD>
+<DT><A HREF="#lbAL">RESOURCE REQUIREMENTS</A><DD>
+<DT><A HREF="#lbAM">EXPLANATION</A><DD>
+<DT><A HREF="#lbAN">ACCURACY</A><DD>
+<DT><A HREF="#lbAO">PERFORMANCE</A><DD>
+<DT><A HREF="#lbAP">CONFIG FILES</A><DD>
+<DT><A HREF="#lbAQ">ENVIRONMENT VARIABLES</A><DD>
+<DT><A HREF="#lbAR">SECURITY AND SAFETY</A><DD>
+<DT><A HREF="#lbAS">OTHER PLATFORMS</A><DD>
+<DT><A HREF="#lbAT">KNOWN ISSUES</A><DD>
+<DT><A HREF="#lbAU">SEE ALSO</A><DD>
+<DT><A HREF="#lbAV">AUTHOR</A><DD>
+<DT><A HREF="#lbAW">COPYRIGHT</A><DD>
+<DT><A HREF="#lbAX">DISCLAIMER</A><DD>
 </DL>
 <HR>
 This document was created by
 <A HREF="http://localhosthttps://linux.die.net/man/1/man2html">man2html</A>,
 using the manual pages.<BR>
-Time: 11:35:35 GMT, July 03, 2018
+Time: 11:54:30 GMT, February 05, 2019
 </BODY>
 </HTML>

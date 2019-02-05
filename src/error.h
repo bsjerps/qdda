@@ -26,8 +26,6 @@
  * Requires a global variable g_debug which, if enabled, prints the 
  * filename and linenumber of the c++ source where throw was called.
  * 
- * 
- * 
  ******************************************************************************/
 
 extern bool g_debug;

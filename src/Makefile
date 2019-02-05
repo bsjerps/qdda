@@ -5,13 +5,16 @@
 # License     : GPLv3+
 # URL         : http://outrun.nl/wiki/qdda
 # ---------------------------------------------------------------------------
+# qdda is designed to be built on Enterprise Linux 6 - gcc 4.4.7 - C++0x
+#============================================================================
 
-prefix     = /usr/local
-branch     = $(shell git symbolic-ref HEAD | awk -F/ '!/master/ {print "-"$$NF}')
-mandir     = $(prefix)/share/man
-datadir    = $(prefix)/share
-RPM       := $(shell rpm --version 2>/dev/null)
-version    = $(shell awk '/^Version:/ {print $$NF}' ../qdda.spec)$(branch)
+SPEC      := ../qdda.spec
+
+RPM        = $(shell rpm --version 2>/dev/null)
+NAME      := qdda
+VERSION    = $(shell rpm -q --qf '%{version}\n' --specfile $(SPEC)|head -1)
+SOURCES    = $(shell rpm --eval %_sourcedir)
+
 CXXFLAGS  += -std=c++0x -DVERSION=$(version)
 CFLAGS    += -O3
 LIBS       = -lpthread -lstdc++ -ldl
@@ -74,7 +77,7 @@ endif
 
 # Create the archive for rpmbuild
 src:	checkrpm allclean
-	tar -jcf $$(rpm --eval %_sourcedir)/qdda-$(version).tbz2 --transform "s|^|qdda/|" *
+	tar --owner=nobody --group=nobody -jcf $(SOURCES)/$(NAME)-$(VERSION).tbz2 -C $${PWD%/*} --transform "s|src|qdda|" src
 
 # Create zipfile for download
 zip:	all
@@ -91,16 +94,20 @@ html: qdda
 	../scripts/gendoc
 
 install: qdda
-	install -m 0755 -d $(prefix)/bin
-	install -m 0755 -d $(mandir)/man1
-	install -m 0755 -d $(datadir)/qdda
-	install -m 0755 qdda $(prefix)/bin
-	cp share/* $(datadir)/qdda
-	$(prefix)/bin/qdda --mandump >$(mandir)/man1/qdda.1
+	install -m 0755 -d $(DESTDIR)/usr/bin
+	install -m 0755 -d $(DESTDIR)/usr/share/man/man1
+	install -m 0755 -d $(DESTDIR)/etc/bash_completion.d
+	install -m 0755 -d $(DESTDIR)/usr/share/qdda
+
+	install -m 0755 -pt $(DESTDIR)/usr/bin/ qdda
+	install -m 0755 -pt $(DESTDIR)/usr/share/$(NAME)/ share/*
+	
+	$(DESTDIR)/usr/bin/qdda --mandump  > $(DESTDIR)/usr/share/man/man1/qdda.1
+	$(DESTDIR)/usr/bin/qdda --bashdump > $(DESTDIR)/etc/bash_completion.d/qdda.bash
 
 uninstall:
-	rm -f $(prefix)/bin/qdda $(mandir)/man1/qdda.1
-	rm -rf $(datadir)/qdda
+	rm -f $(DESTDIR)/usr/bin/qdda $(DESTDIR)/etc/bash_completion.d/qdda.bash
+	rm -rf $(DESTDIR)/usr/share/qdda
 
 tag:
 	git tag v$(version)

@@ -8,8 +8,8 @@ QDDA checks files, named pipes or block devices for duplicate blocks to estimate
 deduplication efficiency on dedupe capable All-Flash Arrays. 
 It also estimates compression ratios.
 
-QDDA uses MD5 hashing and LZ4 compression and stores hash values, hash counts and
-compressed bytes counts in SQLite database format.
+QDDA uses MD5 hashing and LZ4 or DEFLATE compression and stores hash values,
+hash counts and compressed bytes counts in SQLite database format.
 
 Other features:
 
@@ -27,8 +27,9 @@ Other features:
 
 Wiki page: http://outrun.nl/wiki/qdda
 
-Installation: qdda is built and packaged for EL6 (CentOS, RHEL etc). See wiki page for download
-instructions.
+Installation: qdda is built and packaged for EL6 (CentOS, RHEL etc) and is
+upward compatible, so it runs fine on EL7 based systems.
+See wiki page for download instructions.
 
 ## Download
 
@@ -40,6 +41,7 @@ From ZIP file:
 - Download the zipfile and place the binary qdda in $PATH
 
 From YUM repository (RPM/YUM based):
+
 ```
 yum install http://yum.outrun.nl/outrun-extras.rpm
 yum install qdda

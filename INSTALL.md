@@ -4,9 +4,21 @@ QDDA runs on Linux 64-bit.
 
 ## Requirements
 
-TBD
+Linux x86_64 system, glibc >= 2.12 (RHEL/CentOS 6.x)
 
-# Build QDDA
+# INSTALL
+
+## From YUM repository (RPM)
+
+```
+# install outrun-extras repository
+yum install http://yum.outrun.nl/outrun-extras/outrun-extras.rpm
+
+# install qdda
+yum install qdda
+```
+
+## Build QDDA from source
 
 Build requirements:
   * standard build tools (make, gcc_
