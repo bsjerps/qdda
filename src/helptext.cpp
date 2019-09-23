@@ -37,6 +37,7 @@
  * 2.0.8 - Reduced max reader threads from 32 to 8
  * 2.1.0 - Added deflate (VMAX), cleaned code, compression sampling
  * 2.2.0 - Powermax, production version with updated command line, code updates
+ * 2.2.1 - Minor man page update
  * ---------------------------------------------------------------------------
  ******************************************************************************/
  
@@ -651,6 +652,18 @@ nc -l 19000 | qdda
 source host: (as root) 
 .br
 cat /dev/<disk> | nc targethost 19000
+.P
+
+On ESXi, this worked for me. Make sure you pick the raw disk and not a partition (i.e. not ending with :1 or something similar).
+You also need an open outgoing port for this, port 902 is usually open as it is reserved for vCenter.
+.br
+ESX host:
+.br
+cat /vmfs/devices/disks/t10.ATA_____Samsung_SSD_840_PRO_Series______________S1ATNSADB36601D_____ | nc db01 902
+.br
+Linux host (make sure to have netcat installed):
+.br
+nc -l 902 | qdda
 .P
 
 .SH KNOWN ISSUES
