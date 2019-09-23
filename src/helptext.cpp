@@ -41,7 +41,7 @@
  * ---------------------------------------------------------------------------
  ******************************************************************************/
  
-const char* manpage_head = R"(.TH qdda 1 "2019-01-31" "QDDA" "QDDA User Manual"
+const char* manpage_head = R"(.TH qdda 1 "2019-09-23" "QDDA" "QDDA User Manual"
 .SH NAME
 qdda \- the quick & dirty dedupe analyzer
 .SH SYNOPSIS
