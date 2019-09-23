@@ -1,7 +1,7 @@
 <HTML><HEAD>
 </HEAD><BODY>
 <H1>qdda</H1>
-Section: QDDA User Manual (1)<BR>Updated: 2019-01-31<BR><A HREF="#index">Index</A>
+Section: QDDA User Manual (1)<BR>Updated: 2019-09-23<BR><A HREF="#index">Index</A>
 <A HREF="http://localhosthttps://linux.die.net/man/1/man2html">Return to Main Contents</A><HR>
 
 <A NAME="lbAB">&nbsp;</A>
@@ -898,6 +898,6 @@ responsible for any problems you may encounter with this software.
 This document was created by
 <A HREF="http://localhosthttps://linux.die.net/man/1/man2html">man2html</A>,
 using the manual pages.<BR>
-Time: 16:13:46 GMT, September 23, 2019
+Time: 16:19:31 GMT, September 23, 2019
 </BODY>
 </HTML>
