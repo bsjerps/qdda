@@ -69,7 +69,7 @@ with Oracle 12c and ASM. The database on disk has about
 1GB Swingbench benchmark data loaded plus a 700M empty tablespace.
 The database is running while we scan.
 
-![example1](https://github.com/outrunnl/qdda-doc/blob/master/pics/qdda-demo.gif)
+![example1](https://bsjerps.github.io/images/qdda-demo.gif)
 
 ### Example output (Oracle ASM)
 
