@@ -800,6 +800,22 @@ source host: (as root)
 cat /dev/&lt;disk&gt; | nc targethost 19000
 
 <P>
+On ESXi, this worked for me. Make sure you pick the raw disk and not a partition (i.e. not ending with :1 or something similar).
+You also need an open outgoing port for this, port 902 is usually open as it is reserved for vCenter.
+<BR>
+
+ESX host:
+<BR>
+
+cat /vmfs/devices/disks/t10.ATA_____Samsung_SSD_840_PRO_Series______________S1ATNSADB36601D_____ | nc db01 902
+<BR>
+
+Linux host (make sure to have netcat installed):
+<BR>
+
+nc -l 902 | qdda
+
+<P>
 <A NAME="lbAT">&nbsp;</A>
 <H2>KNOWN ISSUES</H2>
 
@@ -882,6 +898,6 @@ responsible for any problems you may encounter with this software.
 This document was created by
 <A HREF="http://localhosthttps://linux.die.net/man/1/man2html">man2html</A>,
 using the manual pages.<BR>
-Time: 11:54:30 GMT, February 05, 2019
+Time: 16:13:46 GMT, September 23, 2019
 </BODY>
 </HTML>
