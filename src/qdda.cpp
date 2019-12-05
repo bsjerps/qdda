@@ -43,7 +43,7 @@ using std::flush;
  ******************************************************************************/
 
 #if defined(VERSION)
-const char* PROGVERSION = TOSTRING(VERSION) RELEASE;
+const char* PROGVERSION = VERSION RELEASE;
 #else
 const char* PROGVERSION = "0.0.1";
 #endif

@@ -15,7 +15,7 @@ NAME      := qdda
 VERSION    = $(shell rpm -q --qf '%{version}\n' --specfile $(SPEC)|head -1)
 SOURCES    = $(shell rpm --eval %_sourcedir)
 
-CXXFLAGS  += -std=c++0x -DVERSION=$(version)
+CXXFLAGS  += -std=c++0x -DVERSION="\"$(version)\""
 CFLAGS    += -O3
 LIBS       = -lpthread -lstdc++ -ldl
 OBJECTS    = sqlite/sqlite3.o
