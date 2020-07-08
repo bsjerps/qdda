@@ -123,7 +123,8 @@ public:
   operator T() { return val; }
   int operator=(T in) {
     if(in < Tmin || in > Tmax) throw BoundedRange();
-    val = in ; 
+    val = in ;
+    return val;
   }
 private:
   T val;
@@ -192,4 +193,3 @@ private:
   option* p_longopts;
   void longopts_init();
 };
-

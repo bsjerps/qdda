@@ -20,11 +20,11 @@
  * 1.7.1 - Minor bugfixes, improved long report, improved progress indicator,
  *         -a (append) option replaces -k (keep)
  * 1.7.2 - Fix rounding error, minor output changes
- * 1.7.3 - Replace openssl with compiled-in MD5 function (no dependency 
+ * 1.7.3 - Replace openssl with compiled-in MD5 function (no dependency
  *         on ssl libs). Increased max blocksize to 128K
  * 1.8.0 - Updated compression support, default blocksize now 16K
  * 1.8.2 - Bugfixes, updated reporting & documentation
- * 1.9.0 - Added 128K compression support, split primary and staging DB, 
+ * 1.9.0 - Added 128K compression support, split primary and staging DB,
  *         code cleanup, minor bugfixes, experimental VMAX compression
  * 2.0.0 - Multithreading and rewrite
  * 2.0.1 - Bugfix max filesize
@@ -38,9 +38,10 @@
  * 2.1.0 - Added deflate (VMAX), cleaned code, compression sampling
  * 2.2.0 - Powermax, production version with updated command line, code updates
  * 2.2.1 - Minor man page update
+ * 2.2.3 - Fix warning followed by core dump on later gcc versions
  * ---------------------------------------------------------------------------
  ******************************************************************************/
- 
+
 const char* manpage_head = R"(.TH qdda 1 "2019-09-23" "QDDA" "QDDA User Manual"
 .SH NAME
 qdda \- the quick & dirty dedupe analyzer
@@ -55,7 +56,7 @@ MD5 hashing and LZ4 or DEFLATE compression. It also estimates compression ratios
 XtremIO X1 and X2 as well as VMAX All-flash / PowerMAX.
 .SH IMPORTANT NOTES
 .B qdda
-can create very large database files and generate lots of read I/O and heavy CPU load. Check the 
+can create very large database files and generate lots of read I/O and heavy CPU load. Check the
 .B RESOURCE REQUIREMENTS
 section before you start.
 .P
@@ -63,7 +64,7 @@ The SQLite database file(s) (qdda.db) may be removed at any time using 'qdda --d
 .P
 For additional safety, run
 .B qdda
-as non-root user. See the 
+as non-root user. See the
 .B SECURITY AND SAFETY
 section for details on how to do this.
 .SH OPTIONS
@@ -81,7 +82,7 @@ read as a stream. It will also read from stdin if it is not connected to a tty, 
 .P
 Each file can have a modifier by adding a colon (:). Currently the modifier is in the format <maxmb[,dup]> where maxmb
 is the maximum amount of mibibytes to read from the stream: /dev/sda:1024 will read the first 1024MiB and then stop. dup is the
-number of times the data is processed (only for testing purposes) i.e. /dev/sda:1024,2 will generate 2048 MiB with dupcount=2 
+number of times the data is processed (only for testing purposes) i.e. /dev/sda:1024,2 will generate 2048 MiB with dupcount=2
 (the first 1024 MiB of sda but processed twice).
 .P
 .B Special\ filenames
@@ -93,7 +94,7 @@ data compressible). This allows you to generate test data.
 .P
 qdda zero:512 random:512 random:256,2 compress:128,4
 .br
-Generates a test dataset with 512MiB zeroed, 512MiB uncompressible, unique data, 256MiB uncompressible data used twice, and 128MiB 
+Generates a test dataset with 512MiB zeroed, 512MiB uncompressible, unique data, 256MiB uncompressible data used twice, and 128MiB
 compressible data with 4 copies each.
 .P
 
@@ -104,18 +105,18 @@ Currently qdda supports 3 storage arrays:
 .IP XtremIO\ X1\ (--array=x1)
 The first generation XtremIO with 8KB block size and compression bucket sizes 2K, 4K, 8K. As XtremIO performs all compression and dedupe
 operations inline, the results of qdda for dedupe should match the array dedupe very closely. XtremIO uses a proprietary compression
-algorithm which has a slightly lower compression ratio compared to LZ4, but claims to be much faster. 
+algorithm which has a slightly lower compression ratio compared to LZ4, but claims to be much faster.
 This means the qdda results are slightly over-optimistic. The differences are too small however to be a major issue.
 .IP XtremIO\ X2\ (--array=x2)\ (default)
 With the X2, the internal blocksize was increased to 16KiB and many more (15) compression bucket sizes are available: 1K up to 16K with
-1K increments, where 14K is missing because in XtremIO X2 architecture it would allocate the same capacity as 15K uncompressed. 
-The larger block size and more variations in buckets makes XtremIO compression much more effective. 
+1K increments, where 14K is missing because in XtremIO X2 architecture it would allocate the same capacity as 15K uncompressed.
+The larger block size and more variations in buckets makes XtremIO compression much more effective.
 There is still a slight difference in compression ratio due to LZ4 versus the native XtremIO algorithm.
 .IP VMAX\ (--array=vmax)
 VMAX All-Flash
 VMAX compresses/dedupes data using 128K chunks which get compressed in bucket sizes from 8K up to 128K with 8K increments.
 The compression is initially performed by splitting 128K into 4 32K chunks, but if the data is cold for a while it can get
-re-compressed on the full 128K block. Not all bucket sizes are available at initial configuration and 
+re-compressed on the full 128K block. Not all bucket sizes are available at initial configuration and
 VMAX changes the compression layout dynamically. The compression algorithm in VMAX is LZS which is similar to LZ4 so
 .B qdda
 uses LZ4 to estimate VMAX compression.
@@ -151,7 +152,7 @@ For this reason, when using DEFLATE a default, random sample interval of 20 is u
 gets sampled. The end compression ratio is then calculated from the sampled values.
 .P
 You can change the default algorithm and interval using the
-.B --compress 
+.B --compress
 option:
 .br
 --compress <none|lz4|deflate>[:interval]
@@ -167,7 +168,7 @@ has basic error handling. Most errors result in simply aborting with an error me
 Currently aborting qdda with ctrl-c may result in corruption of the SQLite QDDA database.
 
 .SH EXAMPLE
-.TP 
+.TP
 .B qdda -d /tmp/demo compress:128,4 compress:256,2 compress:512 zero:512
 Analyze a compressible reference test data set with 128Mx4, 256Mx2, 512x1 and 512M zeroed.
 .P
@@ -238,7 +239,7 @@ Blocks that are unique (cannot be deduped)
 .IP non-unique\ data
 Blocks that appear at least 2x (can be deduped)
 .IP compressed\ raw
-Capacity required for compressing all raw data (before dedupe) 
+Capacity required for compressing all raw data (before dedupe)
 i.e. sum of compressed size of all scanned blocks
 .IP compressed\ net
 Capacity required for compressing all deduped data (after dedupe)
@@ -267,11 +268,11 @@ Show detailed histograms from the database
 .B Example output
 .nf
 File list:
-file      blksz     blocks         MiB date               url                                                                             
-1         16384       8192         128 20190204_0944      workstation:/dev/urandom                                                        
-2         16384      16384         256 20190204_0944      workstation:/dev/urandom                                                        
-3         16384      32768         512 20190204_0944      workstation:/dev/zero                                                           
-4         16384      32768         512 20190204_0944      workstation:/dev/urandom                                                        
+file      blksz     blocks         MiB date               url
+1         16384       8192         128 20190204_0944      workstation:/dev/urandom
+2         16384      16384         256 20190204_0944      workstation:/dev/urandom
+3         16384      32768         512 20190204_0944      workstation:/dev/zero
+4         16384      32768         512 20190204_0944      workstation:/dev/urandom
 
 Dedupe histogram:
 dup            blocks         perc          MiB
@@ -281,7 +282,7 @@ dup            blocks         perc          MiB
 4               32768        25.00       512.00
 Total:         131072       100.00      2048.00
 
-Compression Histogram (2): 
+Compression Histogram (2):
 size          buckets       RawMiB         perc       blocks                  MiB
 1                3350        52.34         5.84          210                 3.28
 2                3642        56.91         6.35          456                 7.12
@@ -311,9 +312,9 @@ shows info on the files that were scanned.
 shows the distribution of duplicate counts of the scanned blocks. The first row (0) is a special case and shows
 how many blocks were blank (zeroed). Each other row shows dupcount (how many copies of each block were found), the amount of blocks,
 the percentage (from all scanned blocks), and Mibibytes (after dedupe). For example, the row with dupcount 4 has 32768 blocks
-which means qdda found 4 blocks to be the same (dupcount 4), 4 more blocks being the same and so on with a total of 32768 blocks 
+which means qdda found 4 blocks to be the same (dupcount 4), 4 more blocks being the same and so on with a total of 32768 blocks
 (8192 sets of 4 similar blocks each).
-The row with dup=1 means these are unique blocks in the dataset. A very high dupcount usually is the result of some special blocks such as 
+The row with dup=1 means these are unique blocks in the dataset. A very high dupcount usually is the result of some special blocks such as
 filled with ones (0xFFFFFFFF...) or other common data structures such as metadata or padding blocks.
 In our reference test set the dupcounts are distributed evenly.
 .P
@@ -338,12 +339,12 @@ Shows the 5 most common hash values in the database. Note that these are the 60-
 .br
 (from a scan of a Linux bootdisk i.e. /dev/sda)
 .nf
-hash                 blocks    
-452707908990536042   402       
-110182122676868616   146       
-356086100205023294   16        
-918237101795036785   9         
-941619753194353532   9      
+hash                 blocks
+452707908990536042   402
+110182122676868616   146
+356086100205023294   16
+918237101795036785   9
+941619753194353532   9
 .fi
 .P
 .B Explanation
@@ -356,10 +357,10 @@ the offsets (will look for the 2nd most common hash, 110182122676868616):
 sqlite3 qdda-staging.db "select * from offsets where hash=110182122676868616 limit 2"
 .br
 .nf
-hash                hexhash             offset      bytes     
+hash                hexhash             offset      bytes
 ------------------  ------------------  ----------  ----------
-110182122676868616  0x0187720e8ac0d608  181         2965504   
-110182122676868616  0x0187720e8ac0d608  182         2981888   
+110182122676868616  0x0187720e8ac0d608  181         2965504
+110182122676868616  0x0187720e8ac0d608  182         2981888
 .fi
 .P
 We see that the hash appears on block offsets 181 and 182 (and 144 more but we limit the query to the first 2).
@@ -376,7 +377,7 @@ etc...
 .fi
 We can verify the MD5 hash:
 .P
-dd bs=16K status=none count=1 if=/dev/sda skip=181 | md5sum 
+dd bs=16K status=none count=1 if=/dev/sda skip=181 | md5sum
 .P
 .nf
 92ab673d915a94dcf187720e8ac0d608  -
@@ -384,7 +385,7 @@ dd bs=16K status=none count=1 if=/dev/sda skip=181 | md5sum
 .fi
 
 .SH COMBINING MULTIPLE SCANS
-By default, when scanning data, qdda deletes the existing database and creates a new one. 
+By default, when scanning data, qdda deletes the existing database and creates a new one.
 Using the --append option you can keep existing data
 and add more file(s) to the existing database:
 .P
@@ -402,7 +403,7 @@ qdda --import db2.db
 .fi
 The newly created database qdda.db will contain data from both db1 and db2.
 .P
-The combined databases can be gathered from different servers (by copying 
+The combined databases can be gathered from different servers (by copying
 the qdda.db files to one central location) so this
 allows one to create a data reduction analysis across multiple hosts.
 .SH RESOURCE REQUIREMENTS
@@ -492,7 +493,7 @@ section.
 .P
 .B Compression:
 
-Some All-Flash arrays use "bucket" compression to achieve high throughput, low overhead and good compression. 
+Some All-Flash arrays use "bucket" compression to achieve high throughput, low overhead and good compression.
 qdda simulates compression uzing LZ4 compression. LZ4 has very high throughput and the compression ratios
 are very close to what All-Flash Arrays can achieve. For VMAX/Powermax, DEFLATE (zlib) is used which is much slower
 but achieves a higher compression rate (everything is a tradeoff).
@@ -509,7 +510,7 @@ compress ratio (16384:5120 vs 16384:4444) but vastly improves performance and re
 .P
 .B Throttling:
 
-qdda processes a number of blocks per read IO and measures the service time. 
+qdda processes a number of blocks per read IO and measures the service time.
 If the service time is too low it means the throughput is
 higher than the bandwidth limit. The reader is then put to sleep for a number of microseconds to match the overall bandwidth limit.
 This prevents accidentally starving IO on a production host. Disable throttling with '--bandwidth 0' or set a different bandwidth.
@@ -524,7 +525,7 @@ with matching blocksizes can be merged or combined. The maximum blocksize is cur
 .B Notes on hash algorithm
 .P
 .B qdda
-uses an integer field to store the hash value in SQLite. 
+uses an integer field to store the hash value in SQLite.
 An SQLite integer (used for the hash in the primary key-value table) has max 8 bytes and is
 signed integer with a MAX value of 9 223 372 036 854 775 807 (2^64/2-1).
 .br
@@ -535,7 +536,7 @@ The number of rows with a 50% chance of a hash collision is roughly
 .br
 .B rows = 0.5 + sqrt(0.25 + 2 * ln (2) * 2^bits)
 .br
-See 
+See
 .I https://en.wikipedia.org/wiki/Birthday_problem#Probability_table
 for more info on hash collisions.
 .br
@@ -578,11 +579,11 @@ DB insert:        51219           usec, 20963.74   MB/s, 1279525.12  rows/s
 .in
 .P
 The overview shows how fast a single core can hash, compress and update a dataset of the given size (this is on an
-Intel Core i5-4440 CPU @ 3.10GHz). The reference dataset is a random(ish) block of data and the numbers are an indication only. 
+Intel Core i5-4440 CPU @ 3.10GHz). The reference dataset is a random(ish) block of data and the numbers are an indication only.
 Note that the compress rate is inaccurate but repeatable. A real dataset is usually less random and may show higher or lower speeds.
 .P
 A data scan by default will allocate 1 thread per file, 1 thread for database updates and the number of worker threads equal to the
-amount of cpu cures. Experience shows that the bottleneck is usually read IO bandwidth until the database updater is maxed out (on a 
+amount of cpu cures. Experience shows that the bottleneck is usually read IO bandwidth until the database updater is maxed out (on a
 fast reference system this happened at about 7000MB/s). Future versions may use multiple updater threads to avoid this bottleneck.
 .P
 After data scan the staging data has to be merged with the primary database. This is done by joining existing data with staging data
@@ -601,7 +602,7 @@ Tuning - You may speed up I/O by altering the default database location from $HO
 to a faster file system (such as SSD based). You can also set the SQLite TEMP dir to an alternative location with '--tmpdir <dir>'
 or setting SQLITE_TMPDIR (also helps if you run out of diskspace).
 .br
-You can avoid the merge (join) phase and delay it to a later moment using the "--nomerge" (no report) option. 
+You can avoid the merge (join) phase and delay it to a later moment using the "--nomerge" (no report) option.
 Ideal if you scan on a slow server with limited space and you want to do the heavy lifting on a faster host later.
 
 .SH CONFIG FILES
@@ -617,7 +618,7 @@ if SQLITE_TMPDIR is not set, TMPDIR is used for temp tables
 
 .SH SECURITY AND SAFETY
 .B qdda
-is safe to run even on files/devices that are in use. It opens streams read-only and by design, it cannot modify any files except 
+is safe to run even on files/devices that are in use. It opens streams read-only and by design, it cannot modify any files except
 SQLite3 database files. It writes to a database file that needs to be either newly created or a pre-existing SQLite3 database.
 It can remove the database file but ONLY if it is an SQLite3 file.
 .P
@@ -625,7 +626,7 @@ For added safety you may run qdda as a non-privileged user. However, non-root us
 To run qdda in a safe way, there are various methods you need to provide read access to the disk devices you need to scan.
 .P
 Changing the group/permissions using chmod on /dev/<disk> is problematic as it either gives all users read access
-or alters permissions which may break other applications such as Oracle ASM. 
+or alters permissions which may break other applications such as Oracle ASM.
 .br
 The best solution to this issue I have found is to use extended ACLs on Linux:
 .PP
@@ -635,7 +636,7 @@ setfacl -m u:<user>:r /dev/<disk>
 .EE
 .PP
 .br
-This gives <user> read-only access without altering any of the existing ownerships/permissions. The permissions will 
+This gives <user> read-only access without altering any of the existing ownerships/permissions. The permissions will
 typically be reset at next reboot or through udev(7).
 You need to have ACL enabled on the file system containing /dev/ and the setfacl tool installed.
 
@@ -649,7 +650,7 @@ target host: (as qdda)
 .br
 nc -l 19000 | qdda
 .br
-source host: (as root) 
+source host: (as root)
 .br
 cat /dev/<disk> | nc targethost 19000
 .P
@@ -688,7 +689,7 @@ Written by Bart Sjerps \fIhttp://bartsjerps.wordpress.com\fR
 .br
 If you have suggestions for improvements in this tool, please send them along via the above address.
 .br
-The source code and downloadable binaries are available from \fIhttps://github.com/outrunnl/qdda\fR 
+The source code and downloadable binaries are available from \fIhttps://github.com/outrunnl/qdda\fR
 
 .SH COPYRIGHT
 Copyright © 2018 Bart Sjerps,  License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>.
@@ -696,12 +697,12 @@ Copyright © 2018 Bart Sjerps,  License GPLv3+: GNU GPL version 3 or later <http
 This is free software: you are free to change and redistribute it.  There is NO WARRANTY, to the extent permitted by law.
 
 .SH DISCLAIMER
-This software is provided "as is" and follows the licensing and warranty guidelines 
-of the GPL. In normal language that means I will not be held 
+This software is provided "as is" and follows the licensing and warranty guidelines
+of the GPL. In normal language that means I will not be held
 responsible for any problems you may encounter with this software.
 )";
 
-const char* bash_complete = 
+const char* bash_complete =
 R"(#============================================================================
 # Title       : qdda.bash
 # Description : bash_completion file for qdda
@@ -717,12 +718,12 @@ _qdda() {
   local -a opts shortopts longopts
   local cur prev disks
   _get_comp_words_by_ref cur prev
-  
+
   shortopts=(V h m d a q b x n)
   longopts+=(version help man db append delete quiet bandwidth array)
   longopts+=(compress detail dryrun purge import cputest nomerge debug queries)
   longopts+=(tmpdir workers readers findhash tophash squash bashdump complete demo)
-  
+
   opts=$(printf "\x2d%s " "${shortopts[@]}")
   opts+=$(printf "\x2d\x2d%s " "${longopts[@]}")
 
