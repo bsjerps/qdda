@@ -849,7 +849,7 @@ Written by Bart Sjerps <I><A HREF="http://bartsjerps.wordpress.com">http://barts
 If you have suggestions for improvements in this tool, please send them along via the above address.
 <BR>
 
-The source code and downloadable binaries are available from <I><A HREF="https://github.com/outrunnl/qdda">https://github.com/outrunnl/qdda</A></I> 
+The source code and downloadable binaries are available from <I><A HREF="https://github.com/bsjerps/qdda">https://github.com/bsjerps/qdda</A></I> 
 <P>
 <A NAME="lbAW">&nbsp;</A>
 <H2>COPYRIGHT</H2>

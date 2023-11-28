@@ -1,10 +1,10 @@
 /*******************************************************************************
  * Title       : qdda - quick & dirty dedup analyzer
  * Description : Checks files or block devices for duplicate blocks
- * Author      : Bart Sjerps <bart@outrun.nl>
+ * Author      : Bart Sjerps <bart@dirty-cache.com>
  * License     : GPLv3+
  * Disclaimer  : See https://www.gnu.org/licenses/gpl-3.0.txt
- * More info   : http://outrun.nl/wiki/qdda
+ * More info   : https://wiki.dirty-cache.com/qdda
  * -----------------------------------------------------------------------------
  * Build notes: Requires lz4 >= 1.7.1
  ******************************************************************************/
@@ -111,7 +111,7 @@ FileData::FileData(const string& file) {
  ******************************************************************************/
 
 const char * version_info  = 
-  "Copyright (C) 2018 Bart Sjerps <bart@outrun.nl>\n"
+  "Copyright (C) 2018 Bart Sjerps <bart@dirty-cache.com>\n"
   "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
   "This is free software: you are free to change and redistribute it.\n"
   "There is NO WARRANTY, to the extent permitted by law.\n\n"
@@ -411,7 +411,7 @@ const string& defaultDbName() {
 void showhelp(LongOptions& lo) {
   std::cout << "\nUsage: qdda <options> [FILE]...\nOptions:" << "\n";
   lo.printhelp(cout);
-  std::cout << "\nMore info: qdda --man \nor the project homepage: http://outrun.nl/wiki/qdda\n\n";
+  std::cout << "\nMore info: qdda --man \nor the project homepage: https://wiki.dirty-cache.com/qdda\n\n";
 }
 
 // dump manpage to stdout

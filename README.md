@@ -1,7 +1,7 @@
 QDDA - The Quick and Dirty Deduplication Analyzer
 ======================
 
-![logo](https://github.com/outrunnl/qdda/blob/master/pics/qdda.png)
+![logo](https://github.com/bsjerps/qdda/blob/master/pics/qdda.png)
 
 ## Description
 QDDA checks files, named pipes or block devices for duplicate blocks to estimate 
@@ -25,7 +25,7 @@ Other features:
 - Scan speed (observed) up to 7GB/s (multi-threaded)
 - The SQLite database can be queried with standard SQLite tools
 
-Wiki page: http://outrun.nl/wiki/qdda
+Wiki page: [qdda](https://wiki.dirty-cache.com/Qdda)
 
 Installation: qdda is built and packaged for EL6 (CentOS, RHEL etc) and is
 upward compatible, so it runs fine on EL7 based systems.
@@ -33,7 +33,7 @@ See wiki page for download instructions.
 
 ## Download
 
-[latest version](https://github.com/outrunnl/qdda/releases/latest)
+[latest version](https://github.com/bsjerps/qdda/releases/latest)
 
 ## Installation
 
@@ -43,7 +43,7 @@ From ZIP file:
 From YUM repository (RPM/YUM based):
 
 ```
-yum install http://yum.outrun.nl/outrun-extras.rpm
+yum install https://yum.dirty-cache.com/dcrepo-release.rpm
 yum install qdda
 ```
 
@@ -54,7 +54,7 @@ See [INSTALL](INSTALL.md)
 ## Usage
 
 Run `qdda -h` for command line options, `qdda -m` for more extensive help.
-Further documentation on the wiki page: http://outrun.nl/wiki/qdda
+Further documentation on the wiki page: https://wiki.dirty-cache.com/qdda
 
 ## Man page
 

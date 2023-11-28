@@ -1,10 +1,10 @@
 /*******************************************************************************
  * Title       : database.cpp
  * Description : Database code for qdda
- * Author      : Bart Sjerps <bart@outrun.nl>
+ * Author      : Bart Sjerps <bart@dirty-cache.com>
  * License     : GPLv3+
  * Disclaimer  : See https://www.gnu.org/licenses/gpl-3.0.txt
- * More info   : http://outrun.nl/wiki/qdda
+ * More info   : https://wiki.dirty-cache.com/qdda
  * -----------------------------------------------------------------------------
  ******************************************************************************/
 

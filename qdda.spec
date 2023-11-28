@@ -1,11 +1,11 @@
 Summary:	The quick & dirty dedupe analyzer
 Name:		qdda
-Version:	2.2.3
+Version:	2.2.4
 Release:	1%{?dtap}
-URL:		https://github.com/outrunnl/qdda
+URL:		https://github.com/bsjerps/qdda
 Source0:	%{name}-%{version}.tbz2
 License:	GPLv3+
-Group:		Outrun/Extras
+Group:		System/Extras
 
 %description
 Checks files or block devices for duplicate blocks to estimate deduplication

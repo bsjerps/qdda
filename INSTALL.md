@@ -11,8 +11,8 @@ Linux x86_64 system, glibc >= 2.12 (RHEL/CentOS 6.x)
 ## From YUM repository (RPM)
 
 ```
-# install outrun-extras repository
-yum install http://yum.outrun.nl/outrun-extras/outrun-extras.rpm
+# install dirty-cache repository
+yum install https://yum.dirty-cache.com/dcrepo-release.rpm
 
 # install qdda
 yum install qdda
@@ -27,7 +27,8 @@ Build requirements:
 ## Instructions
 ```
 # Clone or download QDDA from github:
-wget https://github.com/outrunnl/qdda/archive/master.zip
+wget https://github.com/bsjerps/qdda/archive/master.zip
+
 # unzip
 unzip master.zip
 # change to src directory

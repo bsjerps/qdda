@@ -1,9 +1,9 @@
 #============================================================================
 # Title       : Makefile
 # Description : Makefile for qdda (quick & dirty dedupe analyzer)
-# Author      : Bart Sjerps <bart@outrun.nl>
+# Author      : Bart Sjerps <bart@dirty-cache.com>
 # License     : GPLv3+
-# URL         : http://outrun.nl/wiki/qdda
+# URL         : https://wiki.dirty-cache.com/qdda
 # ---------------------------------------------------------------------------
 # qdda is designed to be built on Enterprise Linux 6 - gcc 4.4.7 - C++0x
 #============================================================================

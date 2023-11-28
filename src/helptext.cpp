@@ -1,10 +1,10 @@
 /*******************************************************************************
  * Title       : helptext.cpp
  * Description : C++ manpage and help text definitions for qdda
- * Author      : Bart Sjerps <bart@outrun.nl>
+ * Author      : Bart Sjerps <bart@dirty-cache.com>
  * License     : GPLv3+
  * Disclaimer  : See https://www.gnu.org/licenses/gpl-3.0.txt
- * More info   : http://outrun.nl/wiki/qdda
+ * More info   : https://wiki.dirty-cache.com/qdda
  * -----------------------------------------------------------------------------
  * Revision history:
  * 1.0   - First published version
@@ -39,6 +39,7 @@
  * 2.2.0 - Powermax, production version with updated command line, code updates
  * 2.2.1 - Minor man page update
  * 2.2.3 - Fix warning followed by core dump on later gcc versions
+ * 2.2.4 - Update URLs and version
  * ---------------------------------------------------------------------------
  ******************************************************************************/
 
@@ -689,7 +690,7 @@ Written by Bart Sjerps \fIhttp://bartsjerps.wordpress.com\fR
 .br
 If you have suggestions for improvements in this tool, please send them along via the above address.
 .br
-The source code and downloadable binaries are available from \fIhttps://github.com/outrunnl/qdda\fR
+The source code and downloadable binaries are available from \fIhttps://github.com/bsjerps/qdda\fR
 
 .SH COPYRIGHT
 Copyright © 2018 Bart Sjerps,  License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>.
@@ -706,7 +707,7 @@ const char* bash_complete =
 R"(#============================================================================
 # Title       : qdda.bash
 # Description : bash_completion file for qdda
-# Author      : Bart Sjerps <bart@outrun.nl>
+# Author      : Bart Sjerps <bart@dirty-cache.com>
 # Usage       : Copy this file to /etc/bash_completion.d/qdda.bash
 # License     : GPLv3+
 # ---------------------------------------------------------------------------

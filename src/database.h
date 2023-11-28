@@ -1,10 +1,10 @@
 /*******************************************************************************
  * Title       : database.h
  * Description : header file for database.cpp
- * Author      : Bart Sjerps <bart@outrun.nl>
+ * Author      : Bart Sjerps <bart@dirty-cache.com>
  * License     : GPLv3+, https://www.gnu.org/licenses/gpl-3.0.txt
  * Disclaimer  : GPLv3+
- * URL         : http://outrun.nl/wiki/qdda
+ * URL         : https://wiki.dirty-cache.com/qdda
  ******************************************************************************/
 
 #pragma once
